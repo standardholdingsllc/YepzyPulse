@@ -1,8 +1,12 @@
 /**
  * API endpoint for generating client-upload tokens for Vercel Blob.
  *
- * We intentionally do not use the onUploadCompleted callback here because
- * the app starts processing via /api/start-processing after upload() resolves.
+ * Handles two event types from the @vercel/blob client protocol:
+ *   1. blob.generate-client-token  – returns a signed token for direct upload
+ *   2. blob.upload-completed       – acknowledged after Vercel Blob finishes storing the file
+ *
+ * Processing is triggered separately via /api/start-processing after the
+ * client-side upload() promise resolves.
  */
 
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
@@ -13,7 +17,7 @@ export const runtime = "nodejs";
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const body = (await request.json()) as HandleUploadBody;
-    console.log(`[Upload] Event type: ${body?.type ?? "unknown"}`);
+    console.log(`[Upload] Received event type: ${body?.type ?? "unknown"}`);
 
     const jsonResponse = await handleUpload({
       body,
@@ -40,8 +44,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           addRandomSuffix: true,
         };
       },
+      onUploadCompleted: async ({ blob }) => {
+        // Called by Vercel Blob infrastructure (server-to-server) after
+        // all data is stored. We just log here; actual processing is
+        // triggered by the client calling /api/start-processing.
+        console.log(
+          `[Upload] Blob upload completed - url: ${blob.url}, path: ${blob.pathname}, contentType: ${blob.contentType}`
+        );
+      },
     });
 
+    console.log(`[Upload] Responding to ${body?.type ?? "unknown"} event`);
     return NextResponse.json(jsonResponse);
   } catch (error) {
     console.error("[Upload] Error:", error);

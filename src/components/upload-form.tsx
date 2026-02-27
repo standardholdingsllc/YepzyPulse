@@ -42,6 +42,18 @@ export function UploadForm() {
   const BLOB_UPLOAD_THRESHOLD_MB = 4; // Use blob for anything over 4MB (Vercel's limit is 4.5MB)
   const MAX_FILE_SIZE_MB = 500; // Max file size supported with blob upload
   const UPLOAD_IDLE_TIMEOUT_MS = 90_000;
+  const UPLOAD_TOTAL_TIMEOUT_MS = 10 * 60 * 1000; // 10 minute hard cap for the entire upload
+
+  /** Structured client-side logger that timestamps every upload event. */
+  const log = (phase: string, msg: string, data?: Record<string, unknown>) => {
+    const ts = new Date().toISOString();
+    const prefix = `[Upload:${phase}]`;
+    if (data) {
+      console.log(`${ts} ${prefix} ${msg}`, data);
+    } else {
+      console.log(`${ts} ${prefix} ${msg}`);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,6 +79,8 @@ export function UploadForm() {
     const fileSizeMB = csvFile.size / 1024 / 1024;
     const useBlobUpload = fileSizeMB > BLOB_UPLOAD_THRESHOLD_MB;
 
+    log("init", `Starting upload – size: ${fileSizeMB.toFixed(1)}MB, type: "${csvFile.type}", useBlobUpload: ${useBlobUpload}`);
+
     try {
       if (useBlobUpload) {
         // Large file: use client upload directly to Vercel Blob
@@ -75,11 +89,18 @@ export function UploadForm() {
 
         const safeFilename = csvFile.name.replace(/[^a-zA-Z0-9._-]/g, "-");
         const pathname = `csv-uploads/${Date.now()}-${safeFilename}`;
+        log("blob", `Pathname: ${pathname}, safe filename: ${safeFilename}`);
 
         const uploadWithWatchdog = async (multipart: boolean) => {
+          const mode = multipart ? "multipart" : "single-put";
+          log(mode, `Starting ${mode} upload…`);
+
           const controller = new AbortController();
           let idleTimer: ReturnType<typeof setTimeout> | null = null;
+          let totalTimer: ReturnType<typeof setTimeout> | null = null;
           let lastLoaded = -1;
+          let progressEventCount = 0;
+          const startTime = Date.now();
 
           const clearIdleTimer = () => {
             if (idleTimer) {
@@ -91,31 +112,78 @@ export function UploadForm() {
           const resetIdleTimer = () => {
             clearIdleTimer();
             idleTimer = setTimeout(() => {
+              const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+              log(mode, `Idle timeout after ${elapsed}s – no progress for ${UPLOAD_IDLE_TIMEOUT_MS / 1000}s. Aborting.`, {
+                lastLoaded,
+                progressEventCount,
+              });
               controller.abort();
             }, UPLOAD_IDLE_TIMEOUT_MS);
           };
 
+          // Hard total timeout so we never hang forever
+          totalTimer = setTimeout(() => {
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+            log(mode, `Total timeout after ${elapsed}s. Aborting.`, {
+              lastLoaded,
+              progressEventCount,
+            });
+            controller.abort();
+          }, UPLOAD_TOTAL_TIMEOUT_MS);
+
+          // Start idle timer AFTER this point (token fetch is separate)
           resetIdleTimer();
 
           try {
-            return await upload(pathname, csvFile, {
+            const blob = await upload(pathname, csvFile, {
               access: "public",
               handleUploadUrl: "/api/upload-csv",
               multipart,
               contentType: csvFile.type || "text/csv",
               abortSignal: controller.signal,
               onUploadProgress: (progressEvent) => {
+                progressEventCount++;
                 if (progressEvent.loaded > lastLoaded) {
                   lastLoaded = progressEvent.loaded;
                   resetIdleTimer();
                 }
                 const percent = Math.round(progressEvent.percentage);
                 setUploadProgress(percent);
-                setProgress(`Uploading file... ${percent}%`);
+                setProgress(`Uploading file… ${percent}%`);
+
+                // Log every 10th event or at 100% to avoid flooding
+                if (progressEventCount <= 3 || progressEventCount % 10 === 0 || percent >= 100) {
+                  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+                  log(mode, `Progress: ${percent}% (${(progressEvent.loaded / 1024 / 1024).toFixed(1)}MB) – event #${progressEventCount} – ${elapsed}s elapsed`);
+                }
               },
             });
+
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+            log(mode, `Upload completed in ${elapsed}s`, {
+              url: blob.url,
+              pathname: blob.pathname,
+              contentType: blob.contentType,
+              progressEvents: progressEventCount,
+            });
+
+            return blob;
+          } catch (uploadErr) {
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+            const errMsg = uploadErr instanceof Error ? uploadErr.message : String(uploadErr);
+            const errStack = uploadErr instanceof Error ? uploadErr.stack : undefined;
+            log(mode, `Upload FAILED after ${elapsed}s: ${errMsg}`, {
+              progressEvents: progressEventCount,
+              lastLoaded,
+              stack: errStack,
+            });
+            throw uploadErr;
           } finally {
             clearIdleTimer();
+            if (totalTimer) {
+              clearTimeout(totalTimer);
+              totalTimer = null;
+            }
           }
         };
 
@@ -126,19 +194,22 @@ export function UploadForm() {
         } catch (firstErr) {
           const message = firstErr instanceof Error ? firstErr.message : String(firstErr);
           const looksStalled = message.toLowerCase().includes("aborted") || message.toLowerCase().includes("abort");
+          log("retry", `First attempt error: "${message}", looksStalled: ${looksStalled}`);
           if (!looksStalled) {
             throw firstErr;
           }
 
           // Fallback mode: single PUT in case multipart stalls on certain networks.
           setUploadProgress(0);
-          setProgress("Upload stalled. Retrying in compatibility mode...");
+          setProgress("Upload stalled. Retrying in compatibility mode…");
+          log("retry", "Falling back to single-PUT upload mode");
           blob = await uploadWithWatchdog(false);
         }
 
-        setProgress("File uploaded! Starting processing...");
+        setProgress("File uploaded! Starting processing…");
         setUploadProgress(100);
         setIsBlobUploading(false);
+        log("process", `Calling /api/start-processing with blobUrl: ${blob.url}`);
 
         // Now tell the server to start processing
         const response = await fetch("/api/start-processing", {
@@ -149,6 +220,8 @@ export function UploadForm() {
             inUsFilter,
           }),
         });
+
+        log("process", `start-processing response: ${response.status}`);
 
         if (!response.ok) {
           const contentType = response.headers.get("content-type");
@@ -161,13 +234,15 @@ export function UploadForm() {
         }
 
         const result = await response.json();
-        setProgress("Processing started! Redirecting...");
+        log("process", `Processing started, redirecting to /r/${result.slug}`);
+        setProgress("Processing started! Redirecting…");
 
         // Redirect to report page (will show processing status)
         router.push(`/r/${result.slug}`);
       } else {
         // Small file: use direct processing (original flow)
-        setProgress("Uploading file...");
+        setProgress("Uploading file…");
+        log("direct", "Using direct upload (small file)");
 
         const formData = new FormData();
         formData.append("csv", csvFile);
@@ -177,6 +252,8 @@ export function UploadForm() {
           method: "POST",
           body: formData,
         });
+
+        log("direct", `generate-report response: ${response.status}`);
 
         if (!response.ok) {
           const contentType = response.headers.get("content-type");
@@ -193,12 +270,17 @@ export function UploadForm() {
         }
 
         const result = await response.json();
-        setProgress("Report generated! Redirecting...");
+        log("direct", `Report generated, redirecting to /r/${result.slug}`);
+        setProgress("Report generated! Redirecting…");
 
         router.push(`/r/${result.slug}`);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred");
+      const errMsg = err instanceof Error ? err.message : "An error occurred";
+      log("error", `Upload flow failed: ${errMsg}`, {
+        stack: err instanceof Error ? err.stack : undefined,
+      });
+      setError(errMsg);
       setIsProcessing(false);
       setIsBlobUploading(false);
       setProgress("");
@@ -330,6 +412,11 @@ export function UploadForm() {
                     <div className="h-full w-1/3 animate-pulse bg-accent/70" />
                   )}
                 </div>
+              )}
+              {isBlobUploading && uploadProgress === 0 && (
+                <p className="mt-1.5 text-xs text-muted">
+                  Establishing connection to storage… (check browser console for details)
+                </p>
               )}
             </div>
           </div>
