@@ -12,6 +12,7 @@ export function UploadForm() {
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [inUsFilter, setInUsFilter] = useState<InUsFilter>("strict");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isBlobUploading, setIsBlobUploading] = useState(false);
   const [progress, setProgress] = useState("");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState("");
@@ -40,6 +41,7 @@ export function UploadForm() {
   // Threshold for using blob upload (files larger than this use client upload + background processing)
   const BLOB_UPLOAD_THRESHOLD_MB = 4; // Use blob for anything over 4MB (Vercel's limit is 4.5MB)
   const MAX_FILE_SIZE_MB = 500; // Max file size supported with blob upload
+  const UPLOAD_IDLE_TIMEOUT_MS = 90_000;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,25 +71,74 @@ export function UploadForm() {
       if (useBlobUpload) {
         // Large file: use client upload directly to Vercel Blob
         setProgress(`Uploading file (${fileSizeMB.toFixed(1)}MB)...`);
+        setIsBlobUploading(true);
 
         const safeFilename = csvFile.name.replace(/[^a-zA-Z0-9._-]/g, "-");
         const pathname = `csv-uploads/${Date.now()}-${safeFilename}`;
 
-        // Upload directly to Vercel Blob from the client
-        const blob = await upload(pathname, csvFile, {
-          access: "public",
-          handleUploadUrl: "/api/upload-csv",
-          multipart: true,
-          contentType: csvFile.type || "text/csv",
-          onUploadProgress: (progressEvent) => {
-            const percent = Math.round(progressEvent.percentage);
-            setUploadProgress(percent);
-            setProgress(`Uploading file... ${percent}%`);
-          },
-        });
+        const uploadWithWatchdog = async (multipart: boolean) => {
+          const controller = new AbortController();
+          let idleTimer: ReturnType<typeof setTimeout> | null = null;
+          let lastLoaded = -1;
+
+          const clearIdleTimer = () => {
+            if (idleTimer) {
+              clearTimeout(idleTimer);
+              idleTimer = null;
+            }
+          };
+
+          const resetIdleTimer = () => {
+            clearIdleTimer();
+            idleTimer = setTimeout(() => {
+              controller.abort();
+            }, UPLOAD_IDLE_TIMEOUT_MS);
+          };
+
+          resetIdleTimer();
+
+          try {
+            return await upload(pathname, csvFile, {
+              access: "public",
+              handleUploadUrl: "/api/upload-csv",
+              multipart,
+              contentType: csvFile.type || "text/csv",
+              abortSignal: controller.signal,
+              onUploadProgress: (progressEvent) => {
+                if (progressEvent.loaded > lastLoaded) {
+                  lastLoaded = progressEvent.loaded;
+                  resetIdleTimer();
+                }
+                const percent = Math.round(progressEvent.percentage);
+                setUploadProgress(percent);
+                setProgress(`Uploading file... ${percent}%`);
+              },
+            });
+          } finally {
+            clearIdleTimer();
+          }
+        };
+
+        let blob;
+        try {
+          // Primary mode: multipart upload for better resilience on large files.
+          blob = await uploadWithWatchdog(true);
+        } catch (firstErr) {
+          const message = firstErr instanceof Error ? firstErr.message : String(firstErr);
+          const looksStalled = message.toLowerCase().includes("aborted") || message.toLowerCase().includes("abort");
+          if (!looksStalled) {
+            throw firstErr;
+          }
+
+          // Fallback mode: single PUT in case multipart stalls on certain networks.
+          setUploadProgress(0);
+          setProgress("Upload stalled. Retrying in compatibility mode...");
+          blob = await uploadWithWatchdog(false);
+        }
 
         setProgress("File uploaded! Starting processing...");
         setUploadProgress(100);
+        setIsBlobUploading(false);
 
         // Now tell the server to start processing
         const response = await fetch("/api/start-processing", {
@@ -100,8 +151,13 @@ export function UploadForm() {
         });
 
         if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || "Failed to start processing");
+          const contentType = response.headers.get("content-type");
+          if (contentType?.includes("application/json")) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || "Failed to start processing");
+          }
+          const errorText = await response.text();
+          throw new Error(errorText || `Failed to start processing (${response.status})`);
         }
 
         const result = await response.json();
@@ -144,6 +200,7 @@ export function UploadForm() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
       setIsProcessing(false);
+      setIsBlobUploading(false);
       setProgress("");
       setUploadProgress(0);
     }
@@ -262,12 +319,16 @@ export function UploadForm() {
             </svg>
             <div className="flex-1">
               <p className="text-sm font-medium text-accent">{progress}</p>
-              {uploadProgress > 0 && uploadProgress < 100 && (
+              {isBlobUploading && (
                 <div className="mt-2 h-1.5 w-full rounded-full bg-dark-bg-tertiary overflow-hidden">
-                  <div 
-                    className="h-full bg-accent transition-all duration-300 ease-out"
-                    style={{ width: `${uploadProgress}%` }}
-                  />
+                  {uploadProgress > 0 ? (
+                    <div
+                      className="h-full bg-accent transition-all duration-300 ease-out"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  ) : (
+                    <div className="h-full w-1/3 animate-pulse bg-accent/70" />
+                  )}
                 </div>
               )}
             </div>

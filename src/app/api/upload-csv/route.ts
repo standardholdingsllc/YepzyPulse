@@ -8,10 +8,13 @@
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { NextRequest, NextResponse } from "next/server";
 
-export async function POST(request: NextRequest): Promise<NextResponse> {
-  const body = (await request.json()) as HandleUploadBody;
+export const runtime = "nodejs";
 
+export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
+    const body = (await request.json()) as HandleUploadBody;
+    console.log(`[Upload] Event type: ${body?.type ?? "unknown"}`);
+
     const jsonResponse = await handleUpload({
       body,
       request,
