@@ -37,8 +37,7 @@ export function UploadForm() {
     }
   };
 
-  // Threshold for using storage upload (files larger than this use storage + background processing)
-  const STORAGE_UPLOAD_THRESHOLD_MB = 4; // Use storage for anything over 4MB (Vercel's limit is 4.5MB)
+  // All uploads go to storage first; no CSV payloads are sent to app API routes.
   const MAX_FILE_SIZE_MB = 500; // Max file size supported with storage upload
   const UPLOAD_TOTAL_TIMEOUT_MS = 10 * 60 * 1000; // 10 minute hard cap
 
@@ -137,138 +136,94 @@ export function UploadForm() {
     setUploadProgress(0);
 
     const fileSizeMB = csvFile.size / 1024 / 1024;
-    const useStorageUpload = fileSizeMB > STORAGE_UPLOAD_THRESHOLD_MB;
-
-    log("init", `Starting upload – size: ${fileSizeMB.toFixed(1)}MB, type: "${csvFile.type}", useStorageUpload: ${useStorageUpload}`);
+    log("init", `Starting upload – size: ${fileSizeMB.toFixed(1)}MB, type: "${csvFile.type}", mode: storage-first`);
 
     try {
-      if (useStorageUpload) {
-        // Large file: upload to Supabase Storage via signed URL, then process in background
-        setProgress(`Uploading file (${fileSizeMB.toFixed(1)}MB)...`);
-        setIsUploading(true);
+      // 1. Upload to storage via signed URL
+      setProgress(`Uploading file (${fileSizeMB.toFixed(1)}MB)...`);
+      setIsUploading(true);
 
-        // 1. Get a signed upload URL from the server
-        log("storage", "Requesting signed upload URL...");
-        const urlResponse = await fetch("/api/get-upload-url", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ filename: csvFile.name }),
-        });
+      log("storage", "Requesting signed upload URL...");
+      const urlResponse = await fetch("/api/get-upload-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: csvFile.name }),
+      });
 
-        if (!urlResponse.ok) {
-          const errData = await urlResponse.json().catch(() => ({}));
-          throw new Error(errData.error || `Failed to get upload URL (${urlResponse.status})`);
-        }
-
-        const { uploadUrl, signedUrl, path: storagePath } = await urlResponse.json();
-        const resolvedUploadUrl: string | undefined = uploadUrl || signedUrl;
-
-        if (!resolvedUploadUrl) {
-          throw new Error("Upload URL missing from server response");
-        }
-
-        log("storage", `Got upload URL for path: ${storagePath}`);
-
-        // 2. Upload file directly to Supabase Storage via the signed URL
-        const controller = new AbortController();
-        const totalTimer = setTimeout(() => {
-          log("storage", `Total timeout after ${UPLOAD_TOTAL_TIMEOUT_MS / 1000}s. Aborting.`);
-          controller.abort();
-        }, UPLOAD_TOTAL_TIMEOUT_MS);
-
-        const startTime = Date.now();
-
-        try {
-          await uploadToStorage(
-            resolvedUploadUrl,
-            csvFile,
-            csvFile.type || "text/csv",
-            (percent) => {
-              setUploadProgress(percent);
-              setProgress(`Uploading file… ${percent}%`);
-              if (percent % 20 === 0 || percent >= 100) {
-                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-                log("storage", `Progress: ${percent}% – ${elapsed}s elapsed`);
-              }
-            },
-            controller.signal,
-          );
-        } finally {
-          clearTimeout(totalTimer);
-        }
-
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-        log("storage", `Upload completed in ${elapsed}s, storagePath: ${storagePath}`);
-
-        setProgress("File uploaded! Starting processing…");
-        setUploadProgress(100);
-        setIsUploading(false);
-
-        // 3. Tell the server to start background processing
-        log("process", `Calling /api/start-processing with storagePath: ${storagePath}`);
-        const response = await fetch("/api/start-processing", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            storagePath,
-            inUsFilter,
-          }),
-        });
-
-        log("process", `start-processing response: ${response.status}`);
-
-        if (!response.ok) {
-          const contentType = response.headers.get("content-type");
-          if (contentType?.includes("application/json")) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || "Failed to start processing");
-          }
-          const errorText = await response.text();
-          throw new Error(errorText || `Failed to start processing (${response.status})`);
-        }
-
-        const result = await response.json();
-        log("process", `Processing started, redirecting to /r/${result.slug}`);
-        setProgress("Processing started! Redirecting…");
-
-        // Redirect to report page (will show processing status)
-        router.push(`/r/${result.slug}`);
-      } else {
-        // Small file: use direct processing (original flow)
-        setProgress("Uploading file…");
-        log("direct", "Using direct upload (small file)");
-
-        const formData = new FormData();
-        formData.append("csv", csvFile);
-        formData.append("inUsFilter", inUsFilter);
-
-        const response = await fetch("/api/generate-report", {
-          method: "POST",
-          body: formData,
-        });
-
-        log("direct", `generate-report response: ${response.status}`);
-
-        if (!response.ok) {
-          const contentType = response.headers.get("content-type");
-          if (contentType?.includes("application/json")) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || "Failed to generate report");
-          } else {
-            const errorText = await response.text();
-            if (errorText.includes("FUNCTION_PAYLOAD_TOO_LARGE") || response.status === 413) {
-              throw new Error("File is too large for direct processing. Please try again.");
-            }
-            throw new Error(errorText || `Server error (${response.status})`);
-          }
-        }
-
-        const result = await response.json();
-        log("direct", `Report generated, redirecting to /r/${result.slug}`);
-        setProgress("Report generated! Redirecting…");
-
-        router.push(`/r/${result.slug}`);
+      if (!urlResponse.ok) {
+        const errData = await urlResponse.json().catch(() => ({}));
+        throw new Error(errData.error || `Failed to get upload URL (${urlResponse.status})`);
       }
+
+      const { uploadUrl, signedUrl, path: storagePath } = await urlResponse.json();
+      const resolvedUploadUrl: string | undefined = uploadUrl || signedUrl;
+
+      if (!resolvedUploadUrl) {
+        throw new Error("Upload URL missing from server response");
+      }
+
+      log("storage", `Got upload URL for path: ${storagePath}`);
+
+      const controller = new AbortController();
+      const totalTimer = setTimeout(() => {
+        log("storage", `Total timeout after ${UPLOAD_TOTAL_TIMEOUT_MS / 1000}s. Aborting.`);
+        controller.abort();
+      }, UPLOAD_TOTAL_TIMEOUT_MS);
+
+      const startTime = Date.now();
+      try {
+        await uploadToStorage(
+          resolvedUploadUrl,
+          csvFile,
+          csvFile.type || "text/csv",
+          (percent) => {
+            setUploadProgress(percent);
+            setProgress(`Uploading file… ${percent}%`);
+            if (percent % 20 === 0 || percent >= 100) {
+              const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+              log("storage", `Progress: ${percent}% – ${elapsed}s elapsed`);
+            }
+          },
+          controller.signal,
+        );
+      } finally {
+        clearTimeout(totalTimer);
+      }
+
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      log("storage", `Upload completed in ${elapsed}s, storagePath: ${storagePath}`);
+
+      setProgress("File uploaded! Starting processing…");
+      setUploadProgress(100);
+      setIsUploading(false);
+
+      // 2. Start processing with a small JSON payload only (no CSV body)
+      log("process", `Calling /api/generate-report with storagePath: ${storagePath}`);
+      const response = await fetch("/api/generate-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          blobUrl: storagePath,
+          options: { inUsFilter },
+        }),
+      });
+
+      log("process", `generate-report response: ${response.status}`);
+
+      if (!response.ok) {
+        const contentType = response.headers.get("content-type");
+        if (contentType?.includes("application/json")) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || "Failed to start processing");
+        }
+        const errorText = await response.text();
+        throw new Error(errorText || `Failed to start processing (${response.status})`);
+      }
+
+      const result = await response.json();
+      log("process", `Processing started, redirecting to /r/${result.slug}`);
+      setProgress("Processing started! Redirecting…");
+      router.push(`/r/${result.slug}`);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : "An error occurred";
       log("error", `Upload flow failed: ${errMsg}`, {

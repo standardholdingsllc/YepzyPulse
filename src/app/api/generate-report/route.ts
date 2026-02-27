@@ -27,8 +27,75 @@ async function fetchOfficialMapping(): Promise<Record<string, string>> {
   return data;
 }
 
+interface AsyncGenerateReportRequest {
+  blobUrl?: string;
+  storagePath?: string;
+  inUsFilter?: InUsFilterMode;
+  options?: {
+    inUsFilter?: InUsFilterMode;
+  };
+}
+
+function resolveInUsFilter(value: unknown): InUsFilterMode {
+  if (value === "strict" || value === "lenient" || value === "all") {
+    return value;
+  }
+  return "strict";
+}
+
+function normalizeStoragePath(value: string): string {
+  return value.trim().replace(/^\/+/, "");
+}
+
 export async function POST(request: NextRequest) {
   try {
+    const contentType = request.headers.get("content-type") ?? "";
+    if (contentType.includes("application/json")) {
+      const body = (await request.json()) as AsyncGenerateReportRequest;
+      const requestedPath =
+        (typeof body.storagePath === "string" && body.storagePath) ||
+        (typeof body.blobUrl === "string" && body.blobUrl) ||
+        "";
+      const storagePath = normalizeStoragePath(requestedPath);
+      const inUsFilter = resolveInUsFilter(body.options?.inUsFilter ?? body.inUsFilter);
+
+      if (!storagePath) {
+        return NextResponse.json(
+          { error: "blobUrl or storagePath is required" },
+          { status: 400 }
+        );
+      }
+
+      console.log(`[API] Starting async report generation for storage path: ${storagePath}`);
+
+      const startProcessingUrl = new URL("/api/start-processing", request.url);
+      const startProcessingResponse = await fetch(startProcessingUrl.toString(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storagePath, inUsFilter }),
+      });
+
+      if (!startProcessingResponse.ok) {
+        const startContentType = startProcessingResponse.headers.get("content-type") ?? "";
+        if (startContentType.includes("application/json")) {
+          const errorJson = await startProcessingResponse.json().catch(() => ({}));
+          return NextResponse.json(
+            { error: errorJson.error || "Failed to start processing" },
+            { status: startProcessingResponse.status }
+          );
+        }
+
+        const errorText = await startProcessingResponse.text();
+        return NextResponse.json(
+          { error: errorText || "Failed to start processing" },
+          { status: startProcessingResponse.status }
+        );
+      }
+
+      const result = await startProcessingResponse.json();
+      return NextResponse.json(result);
+    }
+
     const formData = await request.formData();
 
     const csvFile = formData.get("csv") as File | null;
