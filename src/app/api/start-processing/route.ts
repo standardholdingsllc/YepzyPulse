@@ -1,7 +1,7 @@
 /**
- * API endpoint to start background processing after a file has been uploaded to Vercel Blob.
+ * API endpoint to start background processing after a file has been uploaded to Supabase Storage.
  * 
- * This is called by the client after the blob upload completes.
+ * This is called by the client after the storage upload completes.
  * It creates the report record and triggers background processing.
  */
 
@@ -11,18 +11,18 @@ import { generateSlug } from "@/lib/utils";
 import type { InUsFilterMode } from "@/lib/types";
 
 interface StartProcessingRequest {
-  blobUrl: string;
+  storagePath: string;
   inUsFilter: InUsFilterMode;
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body: StartProcessingRequest = await request.json();
-    const { blobUrl, inUsFilter } = body;
+    const { storagePath, inUsFilter } = body;
 
-    if (!blobUrl) {
+    if (!storagePath) {
       return NextResponse.json(
-        { error: "Blob URL is required" },
+        { error: "Storage path is required" },
         { status: 400 }
       );
     }
@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
     // Generate slug for the report
     const slug = generateSlug(12);
 
-    console.log(`[StartProcessing] Creating report ${slug} for blob: ${blobUrl}`);
+    console.log(`[StartProcessing] Creating report ${slug} for storage path: ${storagePath}`);
 
     // Create report record in "processing" state
     const supabase = createServiceClient();
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
         in_us_filter: inUsFilter,
         classification_rules: {},
         stats: {},
-        csv_blob_url: blobUrl,
+        csv_blob_url: storagePath, // Re-use the column; now stores a Supabase Storage path
       })
       .select("id")
       .single();
@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify({
         reportId: report.id,
         slug,
-        blobUrl,
+        storagePath,
         inUsFilter,
       }),
     }).catch((err) => {

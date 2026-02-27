@@ -1,10 +1,9 @@
 /**
  * Background processing endpoint for large CSV files.
- * This is triggered by the upload-csv endpoint after the file is stored in blob storage.
+ * This is triggered by the start-processing endpoint after the file is stored in Supabase Storage.
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { del } from "@vercel/blob";
 import { createServiceClient } from "@/lib/supabase";
 import { runIngestionPipeline } from "@/lib/pipeline/ingest";
 import { DEFAULT_TRANSACTION_TYPE_RULES } from "@/lib/classification/transaction-types";
@@ -13,6 +12,8 @@ import type { InUsFilterMode } from "@/lib/types";
 import { classifyCustomersInUs } from "@/lib/parsing/location";
 
 export const maxDuration = 300; // 5 minutes for large file processing (Pro plan)
+
+const CSV_BUCKET = "csv-uploads";
 
 // Official employer mapping source
 const OFFICIAL_MAPPING_URL =
@@ -36,7 +37,7 @@ async function fetchOfficialMapping(): Promise<Record<string, string>> {
 interface ProcessRequest {
   reportId: string;
   slug: string;
-  blobUrl: string;
+  storagePath: string;
   inUsFilter: InUsFilterMode;
 }
 
@@ -45,23 +46,27 @@ const BATCH_SIZE = 500;
 export async function POST(request: NextRequest) {
   const supabase = createServiceClient();
   let reportId: string | null = null;
-  let blobUrl: string | null = null;
+  let storagePath: string | null = null;
 
   try {
     const body: ProcessRequest = await request.json();
     reportId = body.reportId;
-    blobUrl = body.blobUrl;
+    storagePath = body.storagePath;
 
     console.log(`[Process] Starting background processing for report ${body.slug}`);
-    console.log(`[Process] Blob URL: ${blobUrl}`);
+    console.log(`[Process] Storage path: ${storagePath}`);
 
-    // 1. Download CSV from blob storage
-    console.log("[Process] Downloading CSV from blob storage...");
-    const csvResponse = await fetch(blobUrl);
-    if (!csvResponse.ok) {
-      throw new Error(`Failed to download CSV: ${csvResponse.status}`);
+    // 1. Download CSV from Supabase Storage
+    console.log("[Process] Downloading CSV from Supabase Storage...");
+    const { data: fileData, error: downloadError } = await supabase.storage
+      .from(CSV_BUCKET)
+      .download(storagePath);
+
+    if (downloadError || !fileData) {
+      throw new Error(`Failed to download CSV: ${downloadError?.message ?? "No data returned"}`);
     }
-    const csvText = await csvResponse.text();
+
+    const csvText = await fileData.text();
     console.log(`[Process] CSV size: ${csvText.length} chars (${(csvText.length / 1024 / 1024).toFixed(2)} MB)`);
 
     // 2. Fetch employer mapping
@@ -239,20 +244,27 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 9. Mark report as ready and clear blob URL (we'll delete the blob)
+    // 9. Mark report as ready and clear the storage path
     console.log("[Process] Marking report as ready...");
     await supabase
       .from("reports")
       .update({ status: "ready", csv_blob_url: null })
       .eq("id", reportId);
 
-    // 10. Delete the blob (cleanup)
-    console.log("[Process] Cleaning up blob storage...");
+    // 10. Delete the file from Supabase Storage (cleanup)
+    console.log("[Process] Cleaning up storage...");
     try {
-      await del(blobUrl);
-      console.log("[Process] Blob deleted successfully");
+      const { error: removeError } = await supabase.storage
+        .from(CSV_BUCKET)
+        .remove([storagePath]);
+
+      if (removeError) {
+        console.error("[Process] Failed to delete storage file (non-fatal):", removeError);
+      } else {
+        console.log("[Process] Storage file deleted successfully");
+      }
     } catch (delError) {
-      console.error("[Process] Failed to delete blob (non-fatal):", delError);
+      console.error("[Process] Failed to delete storage file (non-fatal):", delError);
     }
 
     console.log(`[Process] Report ${body.slug} processed successfully!`);
