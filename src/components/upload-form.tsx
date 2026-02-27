@@ -3,6 +3,7 @@
 import { useState, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useRouter } from "next/navigation";
+import { upload } from "@vercel/blob/client";
 
 type InUsFilter = "strict" | "lenient" | "all";
 
@@ -12,6 +13,7 @@ export function UploadForm() {
   const [inUsFilter, setInUsFilter] = useState<InUsFilter>("strict");
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState("");
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const csvInputRef = useRef<HTMLInputElement>(null);
@@ -35,6 +37,10 @@ export function UploadForm() {
     }
   };
 
+  // Threshold for using blob upload (files larger than this use client upload + background processing)
+  const BLOB_UPLOAD_THRESHOLD_MB = 4; // Use blob for anything over 4MB (Vercel's limit is 4.5MB)
+  const MAX_FILE_SIZE_MB = 500; // Max file size supported with blob upload
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!csvFile) {
@@ -42,35 +48,95 @@ export function UploadForm() {
       return;
     }
 
+    // Client-side file size check
+    if (csvFile.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+      setError(`File is too large (${(csvFile.size / 1024 / 1024).toFixed(1)}MB). Maximum allowed size is ${MAX_FILE_SIZE_MB}MB.`);
+      return;
+    }
+
     setIsProcessing(true);
     setError("");
-    setProgress("Uploading file...");
+    setUploadProgress(0);
+
+    const fileSizeMB = csvFile.size / 1024 / 1024;
+    const useBlobUpload = fileSizeMB > BLOB_UPLOAD_THRESHOLD_MB;
 
     try {
-      const formData = new FormData();
-      formData.append("csv", csvFile);
-      formData.append("inUsFilter", inUsFilter);
+      if (useBlobUpload) {
+        // Large file: use client upload directly to Vercel Blob
+        setProgress(`Uploading file (${fileSizeMB.toFixed(1)}MB)...`);
 
-      setProgress("Processing transactions...");
+        // Upload directly to Vercel Blob from the client
+        const blob = await upload(csvFile.name, csvFile, {
+          access: "public",
+          handleUploadUrl: "/api/upload-csv",
+          onUploadProgress: (progressEvent) => {
+            const percent = Math.round((progressEvent.loaded / progressEvent.total) * 100);
+            setUploadProgress(percent);
+            setProgress(`Uploading file... ${percent}%`);
+          },
+        });
 
-      const response = await fetch("/api/generate-report", {
-        method: "POST",
-        body: formData,
-      });
+        setProgress("File uploaded! Starting processing...");
+        setUploadProgress(100);
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to generate report");
+        // Now tell the server to start processing
+        const response = await fetch("/api/start-processing", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            blobUrl: blob.url,
+            inUsFilter,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || "Failed to start processing");
+        }
+
+        const result = await response.json();
+        setProgress("Processing started! Redirecting...");
+
+        // Redirect to report page (will show processing status)
+        router.push(`/r/${result.slug}`);
+      } else {
+        // Small file: use direct processing (original flow)
+        setProgress("Uploading file...");
+
+        const formData = new FormData();
+        formData.append("csv", csvFile);
+        formData.append("inUsFilter", inUsFilter);
+
+        const response = await fetch("/api/generate-report", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const contentType = response.headers.get("content-type");
+          if (contentType?.includes("application/json")) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || "Failed to generate report");
+          } else {
+            const errorText = await response.text();
+            if (errorText.includes("FUNCTION_PAYLOAD_TOO_LARGE") || response.status === 413) {
+              throw new Error("File is too large for direct processing. Please try again.");
+            }
+            throw new Error(errorText || `Server error (${response.status})`);
+          }
+        }
+
+        const result = await response.json();
+        setProgress("Report generated! Redirecting...");
+
+        router.push(`/r/${result.slug}`);
       }
-
-      const result = await response.json();
-      setProgress("Report generated! Redirecting...");
-
-      router.push(`/r/${result.slug}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
       setIsProcessing(false);
       setProgress("");
+      setUploadProgress(0);
     }
   };
 
@@ -116,7 +182,7 @@ export function UploadForm() {
                   <span className="font-medium text-accent">Drag & drop</span> a CSV here
                 </p>
                 <p className="mt-2 text-xs text-muted">or<span className="text-accent ml-1">Browse Files</span></p>
-                <p className="mt-3 text-xs text-muted/70">CSV files only • Max 200MB</p>
+                <p className="mt-3 text-xs text-muted/70">CSV files only • Up to 500MB supported</p>
               </div>
             )}
             <input
@@ -186,7 +252,17 @@ export function UploadForm() {
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
             </svg>
-            <p className="text-sm font-medium text-accent">{progress}</p>
+            <div className="flex-1">
+              <p className="text-sm font-medium text-accent">{progress}</p>
+              {uploadProgress > 0 && uploadProgress < 100 && (
+                <div className="mt-2 h-1.5 w-full rounded-full bg-dark-bg-tertiary overflow-hidden">
+                  <div 
+                    className="h-full bg-accent transition-all duration-300 ease-out"
+                    style={{ width: `${uploadProgress}%` }}
+                  />
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

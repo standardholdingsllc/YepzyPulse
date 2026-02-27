@@ -4,6 +4,9 @@
   "functions": {
     "src/app/api/generate-report/route.ts": {
       "maxDuration": 60
+    },
+    "src/app/api/process-report/route.ts": {
+      "maxDuration": 300
     }
   }
 }

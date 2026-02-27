@@ -30,12 +30,20 @@ export default async function ReportPage({ params }: PageProps) {
   if (report.status === "processing") {
     return (
       <div className="flex flex-col items-center justify-center py-20">
-        <svg className="mb-4 h-10 w-10 animate-spin text-accent" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-        </svg>
-        <p className="text-lg font-medium text-muted-light">Report is processing...</p>
-        <p className="mt-2 text-sm text-muted">This page will refresh automatically.</p>
+        <div className="rounded-xl border border-accent/30 bg-accent/5 p-8 text-center max-w-md">
+          <svg className="mx-auto mb-4 h-12 w-12 animate-spin text-accent" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+          </svg>
+          <h2 className="text-xl font-semibold text-white mb-2">Processing Your Report</h2>
+          <p className="text-sm text-muted-light mb-4">
+            Your CSV file is being processed in the background. This may take a few minutes for large files.
+          </p>
+          <div className="flex items-center justify-center gap-2 text-xs text-muted">
+            <div className="h-2 w-2 rounded-full bg-accent animate-pulse" />
+            <span>Auto-refreshing every 5 seconds...</span>
+          </div>
+        </div>
         <meta httpEquiv="refresh" content="5" />
       </div>
     );
