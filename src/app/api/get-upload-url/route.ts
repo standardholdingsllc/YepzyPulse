@@ -1,88 +1,17 @@
 /**
- * Generates a signed upload URL for Supabase Storage.
- *
- * The client calls this endpoint to get a URL it can PUT the CSV file to
- * directly, without needing auth headers. This replaces the Vercel Blob
- * client-token flow.
+ * DEPRECATED: Large CSV uploads now use Vercel Blob client uploads via /api/upload-csv.
+ * This endpoint is intentionally disabled to prevent stale clients from using
+ * signed Supabase PUT uploads that can fail on large files.
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase";
+import { NextResponse } from "next/server";
 
-const CSV_BUCKET = "csv-uploads";
-
-function toAbsoluteUploadUrl(signedUrl: string): string {
-  if (/^https?:\/\//i.test(signedUrl)) {
-    return signedUrl;
-  }
-
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (!supabaseUrl) {
-    throw new Error("NEXT_PUBLIC_SUPABASE_URL is not configured");
-  }
-
-  const baseUrl = supabaseUrl.replace(/\/+$/, "");
-  const normalizedPath = signedUrl.startsWith("/") ? signedUrl : `/${signedUrl}`;
-
-  // createSignedUploadUrl may return either:
-  // - /storage/v1/object/upload/sign/...
-  // - /object/upload/sign/...
-  if (normalizedPath.startsWith("/storage/v1/")) {
-    return `${baseUrl}${normalizedPath}`;
-  }
-  return `${baseUrl}/storage/v1${normalizedPath}`;
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const { filename } = await request.json();
-
-    if (!filename || typeof filename !== "string") {
-      return NextResponse.json(
-        { error: "filename is required" },
-        { status: 400 }
-      );
-    }
-
-    const supabase = createServiceClient();
-
-    // Sanitise the filename and build a unique path
-    const safeFilename = filename.replace(/[^a-zA-Z0-9._-]/g, "-");
-    const path = `${Date.now()}-${safeFilename}`;
-
-    console.log(`[GetUploadUrl] Generating signed URL for: ${path}`);
-
-    const { data, error } = await supabase.storage
-      .from(CSV_BUCKET)
-      .createSignedUploadUrl(path);
-
-    if (error) {
-      console.error("[GetUploadUrl] Failed to create signed URL:", error);
-      return NextResponse.json(
-        { error: `Storage error: ${error.message}` },
-        { status: 500 }
-      );
-    }
-
-    console.log(`[GetUploadUrl] Signed URL created for path: ${data.path}`);
-    const uploadUrl = toAbsoluteUploadUrl(data.signedUrl);
-
-    return NextResponse.json({
-      uploadUrl,
-      signedUrl: data.signedUrl,
-      path: data.path,
-      token: data.token,
-    });
-  } catch (error) {
-    console.error("[GetUploadUrl] Error:", error);
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to generate upload URL",
-      },
-      { status: 500 }
-    );
-  }
+export async function POST(): Promise<NextResponse> {
+  return NextResponse.json(
+    {
+      error:
+        "Deprecated endpoint. Uploads now use /api/upload-csv (Vercel Blob). Please refresh and retry.",
+    },
+    { status: 410 }
+  );
 }
