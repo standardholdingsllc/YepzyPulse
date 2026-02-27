@@ -12,23 +12,30 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className="min-h-screen bg-gray-50 antialiased">
-        <header className="border-b bg-white shadow-sm">
+    <html lang="en" className="dark">
+      <body className="min-h-screen bg-gradient-dark antialiased">
+        <header className="border-b border-dark-border bg-dark-bg-secondary/80 backdrop-blur-md sticky top-0 z-50">
           <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
             <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white font-bold text-sm">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-white font-bold text-sm shadow-glow-sm">
                 Y
               </div>
-              <h1 className="text-xl font-semibold text-gray-900">
+              <h1 className="text-xl font-semibold text-white">
                 Yepzy Transaction Processor
               </h1>
             </div>
           </div>
         </header>
-        <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+        <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
           {children}
         </main>
+        <footer className="border-t border-dark-border mt-auto py-6">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <p className="text-center text-sm text-muted">
+              Files are processed securely. Reports expire after 7 days.
+            </p>
+          </div>
+        </footer>
       </body>
     </html>
   );

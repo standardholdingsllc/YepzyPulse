@@ -29,13 +29,17 @@ export function ShareLink({ slug }: { slug: string }) {
 
   return (
     <div className="flex items-center gap-2">
-      <div className="flex items-center rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-        <span className="text-xs text-gray-500 mr-2">Share:</span>
-        <code className="text-xs font-mono text-brand-600">/r/{slug}</code>
+      <div className="flex items-center rounded-lg border border-dark-border bg-dark-bg-tertiary px-3 py-2">
+        <span className="text-xs text-muted mr-2">Share:</span>
+        <code className="text-xs font-mono text-accent">/r/{slug}</code>
       </div>
       <button
         onClick={handleCopy}
-        className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50"
+        className={`rounded-lg border px-3 py-2 text-xs font-medium transition-all ${
+          copied
+            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+            : "border-dark-border bg-dark-bg-secondary text-white hover:bg-dark-bg-tertiary hover:border-accent/50"
+        }`}
       >
         {copied ? "✓ Copied!" : "Copy Link"}
       </button>

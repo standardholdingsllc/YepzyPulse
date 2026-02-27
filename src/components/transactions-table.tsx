@@ -139,12 +139,12 @@ export function TransactionsTable({
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <CardTitle>Transactions ({formatNumber(total)})</CardTitle>
-            <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none">
+            <label className="flex items-center gap-1.5 text-xs text-muted cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={showDebug}
                 onChange={(e) => setShowDebug(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-gray-300 text-brand-600"
+                className="h-3.5 w-3.5 rounded border-dark-border accent-accent"
               />
               Debug
             </label>
@@ -153,7 +153,7 @@ export function TransactionsTable({
             <select
               value={filters.transactionGroup}
               onChange={(e) => handleFilterChange("transactionGroup", e.target.value)}
-              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+              className="rounded-lg border border-dark-border bg-dark-bg-tertiary px-3 py-1.5 text-sm text-white focus:border-accent focus:outline-none"
             >
               <option value="">All types</option>
               {transactionGroups.map((g) => (
@@ -163,7 +163,7 @@ export function TransactionsTable({
             <select
               value={filters.remittanceVendor}
               onChange={(e) => handleFilterChange("remittanceVendor", e.target.value)}
-              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+              className="rounded-lg border border-dark-border bg-dark-bg-tertiary px-3 py-1.5 text-sm text-white focus:border-accent focus:outline-none"
             >
               <option value="">All vendors</option>
               {vendorNames.map((v) => (
@@ -173,7 +173,7 @@ export function TransactionsTable({
             <select
               value={filters.inUs}
               onChange={(e) => handleFilterChange("inUs", e.target.value)}
-              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm"
+              className="rounded-lg border border-dark-border bg-dark-bg-tertiary px-3 py-1.5 text-sm text-white focus:border-accent focus:outline-none"
             >
               <option value="">All locations</option>
               <option value="true">In US</option>
@@ -186,7 +186,7 @@ export function TransactionsTable({
       <CardContent className="overflow-x-auto p-0">
         {loading && (
           <div className="flex items-center justify-center py-8">
-            <svg className="h-6 w-6 animate-spin text-brand-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <svg className="h-6 w-6 animate-spin text-accent" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
             </svg>
@@ -196,35 +196,35 @@ export function TransactionsTable({
           <>
             <table className="min-w-full text-sm">
               <thead>
-                <tr className="border-b bg-gray-50 text-left">
+                <tr className="border-b border-dark-border bg-dark-bg-tertiary/50 text-left">
                   {showDebug && (
-                    <th className="whitespace-nowrap px-2 py-3 font-medium text-gray-600 w-8"></th>
+                    <th className="whitespace-nowrap px-2 py-3 font-medium text-muted w-8"></th>
                   )}
-                  <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">Date</th>
-                  <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">Type</th>
-                  <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600 text-right">Amount</th>
-                  <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">Dir</th>
-                  <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">Customer</th>
-                  <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">Employer</th>
-                  <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">Vendor</th>
-                  <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">Location</th>
-                  <th className="whitespace-nowrap px-4 py-3 font-medium text-gray-600">Summary</th>
+                  <th className="whitespace-nowrap px-4 py-3 font-medium text-muted">Date</th>
+                  <th className="whitespace-nowrap px-4 py-3 font-medium text-muted">Type</th>
+                  <th className="whitespace-nowrap px-4 py-3 font-medium text-muted text-right">Amount</th>
+                  <th className="whitespace-nowrap px-4 py-3 font-medium text-muted">Dir</th>
+                  <th className="whitespace-nowrap px-4 py-3 font-medium text-muted">Customer</th>
+                  <th className="whitespace-nowrap px-4 py-3 font-medium text-muted">Employer</th>
+                  <th className="whitespace-nowrap px-4 py-3 font-medium text-muted">Vendor</th>
+                  <th className="whitespace-nowrap px-4 py-3 font-medium text-muted">Location</th>
+                  <th className="whitespace-nowrap px-4 py-3 font-medium text-muted">Summary</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-dark-border">
                 {transactions.map((tx) => {
                   const isExpanded = expandedRows.has(tx.id);
                   const hasEvidence = tx.vendorMatchEvidence && tx.remittanceVendor !== "Not remittance";
 
                   return (
                     <>
-                      <tr key={tx.id} className="hover:bg-gray-50">
+                      <tr key={tx.id} className="table-row-hover">
                         {showDebug && (
                           <td className="px-2 py-3">
                             {hasEvidence && (
                               <button
                                 onClick={() => toggleRowExpand(tx.id)}
-                                className="flex h-5 w-5 items-center justify-center rounded text-gray-400 hover:bg-gray-200 hover:text-gray-600"
+                                className="flex h-5 w-5 items-center justify-center rounded text-muted hover:bg-dark-bg-tertiary hover:text-white"
                                 title="Show match evidence"
                               >
                                 <svg
@@ -239,7 +239,7 @@ export function TransactionsTable({
                             )}
                           </td>
                         )}
-                        <td className="whitespace-nowrap px-4 py-3 text-xs text-gray-500">
+                        <td className="whitespace-nowrap px-4 py-3 text-xs text-muted">
                           {formatDate(tx.rawCreatedAt)}
                         </td>
                         <td className="px-4 py-3">
@@ -257,34 +257,34 @@ export function TransactionsTable({
                             {tx.transactionGroup}
                           </Badge>
                         </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums font-medium">
+                        <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums font-medium text-white">
                           {formatCents(tx.amountCents)}
                         </td>
                         <td className="px-4 py-3">
                           <span
                             className={
                               tx.direction === "Debit"
-                                ? "text-red-600"
-                                : "text-green-600"
+                                ? "text-red-400"
+                                : "text-emerald-400"
                             }
                           >
                             {tx.direction}
                           </span>
                         </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-xs font-mono text-gray-600">
+                        <td className="whitespace-nowrap px-4 py-3 text-xs font-mono text-muted-light">
                           {tx.customerId}
                         </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-xs text-gray-600">
+                        <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-light">
                           {tx.employerName}
                         </td>
                         <td className="px-4 py-3">
                           {tx.remittanceVendor !== "Not remittance" ? (
                             <Badge variant="info">{tx.remittanceVendor}</Badge>
                           ) : (
-                            <span className="text-xs text-gray-400">—</span>
+                            <span className="text-xs text-muted/50">—</span>
                           )}
                         </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-xs text-gray-500">
+                        <td className="whitespace-nowrap px-4 py-3 text-xs">
                           {tx.locationCountry ? (
                             <Badge
                               variant={
@@ -298,47 +298,47 @@ export function TransactionsTable({
                               {tx.locationRaw || tx.locationCountry}
                             </Badge>
                           ) : (
-                            "—"
+                            <span className="text-muted/50">—</span>
                           )}
                         </td>
-                        <td className="max-w-xs truncate px-4 py-3 text-xs text-gray-500" title={tx.summary}>
+                        <td className="max-w-xs truncate px-4 py-3 text-xs text-muted" title={tx.summary}>
                           {tx.summary || "—"}
                         </td>
                       </tr>
                       {/* Debug row - vendor match evidence */}
                       {showDebug && isExpanded && hasEvidence && (
-                        <tr key={`${tx.id}-debug`} className="bg-slate-50">
+                        <tr key={`${tx.id}-debug`} className="bg-dark-bg-tertiary/30">
                           <td colSpan={10} className="px-4 py-2">
-                            <div className="rounded-md bg-slate-100 px-3 py-2 font-mono text-xs">
+                            <div className="rounded-md bg-dark-bg-tertiary px-3 py-2 font-mono text-xs border border-dark-border">
                               <div className="flex flex-wrap gap-4">
                                 <div>
-                                  <span className="text-slate-500">vendor:</span>{" "}
-                                  <span className="text-purple-600 font-semibold">
+                                  <span className="text-muted">vendor:</span>{" "}
+                                  <span className="text-violet-400 font-semibold">
                                     {tx.vendorMatchEvidence?.vendor}
                                   </span>
                                 </div>
                                 <div>
-                                  <span className="text-slate-500">keyword:</span>{" "}
-                                  <span className="text-green-600 font-semibold">
+                                  <span className="text-muted">keyword:</span>{" "}
+                                  <span className="text-emerald-400 font-semibold">
                                     &quot;{tx.vendorMatchEvidence?.matchedKeyword}&quot;
                                   </span>
                                 </div>
                                 <div>
-                                  <span className="text-slate-500">field:</span>{" "}
-                                  <span className="text-blue-600">
+                                  <span className="text-muted">field:</span>{" "}
+                                  <span className="text-accent">
                                     {tx.vendorMatchEvidence?.matchedField}
                                   </span>
                                 </div>
                                 <div>
-                                  <span className="text-slate-500">pos:</span>{" "}
-                                  <span className="text-amber-600">
+                                  <span className="text-muted">pos:</span>{" "}
+                                  <span className="text-amber-400">
                                     {tx.vendorMatchEvidence?.matchPosition}
                                   </span>
                                 </div>
                               </div>
                               {tx.summary && (
-                                <div className="mt-2 pt-2 border-t border-slate-200">
-                                  <span className="text-slate-500">summary:</span>{" "}
+                                <div className="mt-2 pt-2 border-t border-dark-border">
+                                  <span className="text-muted">summary:</span>{" "}
                                   <HighlightedSummary
                                     summary={tx.summary}
                                     keyword={tx.vendorMatchEvidence?.matchedKeyword || ""}
@@ -355,7 +355,7 @@ export function TransactionsTable({
                 })}
                 {transactions.length === 0 && (
                   <tr>
-                    <td colSpan={showDebug ? 10 : 9} className="px-4 py-8 text-center text-gray-400">
+                    <td colSpan={showDebug ? 10 : 9} className="px-4 py-8 text-center text-muted">
                       No transactions found
                     </td>
                   </tr>
@@ -365,22 +365,22 @@ export function TransactionsTable({
 
             {/* Pagination */}
             {totalPages > 1 && (
-              <div className="flex items-center justify-between border-t px-4 py-3">
-                <p className="text-xs text-gray-500">
+              <div className="flex items-center justify-between border-t border-dark-border px-4 py-3">
+                <p className="text-xs text-muted">
                   Page {page} of {formatNumber(totalPages)} · {formatNumber(total)} total
                 </p>
                 <div className="flex gap-2">
                   <button
                     onClick={() => setPage(Math.max(1, page - 1))}
                     disabled={page === 1}
-                    className="rounded-md border px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                    className="rounded-md border border-dark-border bg-dark-bg-tertiary px-3 py-1 text-xs font-medium text-white hover:bg-dark-border disabled:opacity-50"
                   >
                     Previous
                   </button>
                   <button
                     onClick={() => setPage(Math.min(totalPages, page + 1))}
                     disabled={page === totalPages}
-                    className="rounded-md border px-3 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                    className="rounded-md border border-dark-border bg-dark-bg-tertiary px-3 py-1 text-xs font-medium text-white hover:bg-dark-border disabled:opacity-50"
                   >
                     Next
                   </button>
@@ -407,7 +407,7 @@ function HighlightedSummary({
   field: string;
 }) {
   if (field === "counterpartyName" || !keyword) {
-    return <span className="text-slate-600">{summary}</span>;
+    return <span className="text-muted-light">{summary}</span>;
   }
 
   const lowerSummary = summary.toLowerCase();
@@ -415,7 +415,7 @@ function HighlightedSummary({
   const idx = lowerSummary.indexOf(lowerKeyword);
 
   if (idx === -1) {
-    return <span className="text-slate-600">{summary}</span>;
+    return <span className="text-muted-light">{summary}</span>;
   }
 
   const before = summary.slice(0, idx);
@@ -423,9 +423,9 @@ function HighlightedSummary({
   const after = summary.slice(idx + keyword.length);
 
   return (
-    <span className="text-slate-600">
+    <span className="text-muted-light">
       {before}
-      <span className="bg-yellow-200 text-yellow-900 px-0.5 rounded">{match}</span>
+      <span className="bg-accent/30 text-accent-light px-0.5 rounded">{match}</span>
       {after}
     </span>
   );

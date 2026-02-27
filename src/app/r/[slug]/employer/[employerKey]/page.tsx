@@ -55,14 +55,14 @@ export default async function EmployerDetailPage({ params }: PageProps) {
       <div>
         <Link
           href={`/r/${slug}`}
-          className="text-sm text-gray-400 hover:text-gray-600"
+          className="text-sm text-muted hover:text-accent transition-colors"
         >
           ← Back to report
         </Link>
-        <h2 className="mt-2 text-2xl font-bold text-gray-900">
+        <h2 className="mt-2 text-2xl font-bold text-white">
           {rollup.employerName}
         </h2>
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-muted">
           {formatNumber(rollup.workerCount)} workers · {formatNumber(rollup.transactionCount)} transactions
         </p>
       </div>
@@ -70,11 +70,11 @@ export default async function EmployerDetailPage({ params }: PageProps) {
       {/* Employer KPIs */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-6">
         <StatCard label="Workers" value={formatNumber(rollup.workerCount)} />
-        <StatCard label="Total Debit" value={formatCents(rollup.totalDebitCents)} color="text-red-600" />
-        <StatCard label="Total Credit" value={formatCents(rollup.totalCreditCents)} color="text-green-600" />
-        <StatCard label="Card Spend" value={formatCents(rollup.cardAmountCents)} color="text-blue-600" />
-        <StatCard label="ATM" value={formatCents(rollup.atmAmountCents)} color="text-amber-600" />
-        <StatCard label="Remittance" value={formatCents(rollup.remittanceAmountCents)} color="text-purple-600" />
+        <StatCard label="Total Debit" value={formatCents(rollup.totalDebitCents)} color="text-red-400" />
+        <StatCard label="Total Credit" value={formatCents(rollup.totalCreditCents)} color="text-emerald-400" />
+        <StatCard label="Card Spend" value={formatCents(rollup.cardAmountCents)} color="text-accent" />
+        <StatCard label="ATM" value={formatCents(rollup.atmAmountCents)} color="text-amber-400" />
+        <StatCard label="Remittance" value={formatCents(rollup.remittanceAmountCents)} color="text-violet-400" />
       </div>
 
       {/* Two columns: Workers + Vendor Breakdown */}
@@ -87,17 +87,17 @@ export default async function EmployerDetailPage({ params }: PageProps) {
           <CardContent className="overflow-x-auto p-0">
             <table className="min-w-full text-sm">
               <thead>
-                <tr className="border-b bg-gray-50 text-left">
-                  <th className="px-4 py-3 font-medium text-gray-600">Customer ID</th>
-                  <th className="px-4 py-3 font-medium text-gray-600">US Status</th>
-                  <th className="px-4 py-3 font-medium text-gray-600">Latest Location</th>
-                  <th className="px-4 py-3 font-medium text-gray-600 text-right">Txns</th>
+                <tr className="border-b border-dark-border bg-dark-bg-tertiary/50 text-left">
+                  <th className="px-4 py-3 font-medium text-muted">Customer ID</th>
+                  <th className="px-4 py-3 font-medium text-muted">US Status</th>
+                  <th className="px-4 py-3 font-medium text-muted">Latest Location</th>
+                  <th className="px-4 py-3 font-medium text-muted text-right">Txns</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-dark-border">
                 {workers.map((w) => (
-                  <tr key={w.customerId} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-mono text-xs text-gray-700">
+                  <tr key={w.customerId} className="table-row-hover">
+                    <td className="px-4 py-3 font-mono text-xs text-muted-light">
                       {w.customerId}
                     </td>
                     <td className="px-4 py-3">
@@ -117,22 +117,22 @@ export default async function EmployerDetailPage({ params }: PageProps) {
                             : "Unknown"}
                       </Badge>
                     </td>
-                    <td className="px-4 py-3 text-xs text-gray-500">
+                    <td className="px-4 py-3 text-xs text-muted">
                       {w.latestLocationRaw || "No location data"}
                       {w.latestLocationDate && (
-                        <span className="ml-1 text-gray-400">
+                        <span className="ml-1 text-muted/70">
                           ({new Date(w.latestLocationDate).toLocaleDateString()})
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums">
+                    <td className="px-4 py-3 text-right tabular-nums text-muted-light">
                       {formatNumber(w.transactionCount)}
                     </td>
                   </tr>
                 ))}
                 {workers.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="px-4 py-8 text-center text-gray-400">
+                    <td colSpan={4} className="px-4 py-8 text-center text-muted">
                       No workers found
                     </td>
                   </tr>
@@ -149,21 +149,21 @@ export default async function EmployerDetailPage({ params }: PageProps) {
           </CardHeader>
           <CardContent>
             {vendorEntries.length === 0 ? (
-              <p className="text-sm text-gray-400">No remittance transactions</p>
+              <p className="text-sm text-muted">No remittance transactions</p>
             ) : (
               <div className="space-y-3">
                 {vendorEntries.map(([vendor, data]) => (
                   <div
                     key={vendor}
-                    className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-4 py-3"
+                    className="flex items-center justify-between rounded-lg border border-dark-border bg-dark-bg-tertiary/50 px-4 py-3"
                   >
                     <div>
-                      <p className="text-sm font-medium text-gray-900">{vendor}</p>
-                      <p className="text-xs text-gray-500">
+                      <p className="text-sm font-medium text-white">{vendor}</p>
+                      <p className="text-xs text-muted">
                         {formatNumber(data.count)} transactions
                       </p>
                     </div>
-                    <p className="text-sm font-semibold tabular-nums text-purple-600">
+                    <p className="text-sm font-semibold tabular-nums text-violet-400">
                       {formatCents(data.amountCents)}
                     </p>
                   </div>
@@ -172,7 +172,7 @@ export default async function EmployerDetailPage({ params }: PageProps) {
             )}
 
             {/* Transaction type breakdown */}
-            <h4 className="mt-6 mb-3 text-sm font-semibold text-gray-700">
+            <h4 className="mt-6 mb-3 text-sm font-semibold text-muted-light">
               Transaction Types
             </h4>
             <div className="space-y-2">
@@ -186,8 +186,8 @@ export default async function EmployerDetailPage({ params }: PageProps) {
                   key={item.label}
                   className="flex items-center justify-between text-sm"
                 >
-                  <span className="text-gray-600">{item.label} ({formatNumber(item.count)})</span>
-                  <span className="font-medium tabular-nums">{formatCents(item.amount)}</span>
+                  <span className="text-muted">{item.label} ({formatNumber(item.count)})</span>
+                  <span className="font-medium tabular-nums text-muted-light">{formatCents(item.amount)}</span>
                 </div>
               ))}
             </div>
@@ -210,15 +210,15 @@ export default async function EmployerDetailPage({ params }: PageProps) {
 function StatCard({
   label,
   value,
-  color = "text-gray-900",
+  color = "text-white",
 }: {
   label: string;
   value: string;
   color?: string;
 }) {
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-      <p className="text-xs font-medium text-gray-500">{label}</p>
+    <div className="rounded-xl border border-dark-border bg-dark-bg-secondary/50 p-4">
+      <p className="text-xs font-medium text-muted">{label}</p>
       <p className={`mt-1 text-lg font-bold tabular-nums ${color}`}>{value}</p>
     </div>
   );

@@ -26,7 +26,7 @@ export function ExpiryNotice({ expiresAt }: ExpiryNoticeProps) {
 
   if (daysRemaining <= 0) {
     return (
-      <div className="flex items-center gap-2 rounded-lg bg-red-100 px-3 py-1.5 text-xs font-medium text-red-700">
+      <div className="flex items-center gap-2 rounded-lg bg-red-500/15 border border-red-500/30 px-3 py-1.5 text-xs font-medium text-red-400">
         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
@@ -37,10 +37,10 @@ export function ExpiryNotice({ expiresAt }: ExpiryNoticeProps) {
 
   return (
     <div
-      className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium ${
+      className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium border ${
         isExpiringSoon
-          ? "bg-amber-100 text-amber-700"
-          : "bg-gray-100 text-gray-600"
+          ? "bg-amber-500/15 border-amber-500/30 text-amber-400"
+          : "bg-dark-bg-tertiary border-dark-border text-muted"
       }`}
     >
       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -48,7 +48,7 @@ export function ExpiryNotice({ expiresAt }: ExpiryNoticeProps) {
       </svg>
       <span>
         Expires {daysRemaining === 1 ? "tomorrow" : `in ${daysRemaining} days`}
-        <span className="ml-1 text-gray-400">({formattedDate})</span>
+        <span className="ml-1 text-muted/70">({formattedDate})</span>
       </span>
     </div>
   );

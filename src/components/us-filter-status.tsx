@@ -46,11 +46,11 @@ export function UsFilterStatus({ stats, filterMode }: UsFilterStatusProps) {
   };
 
   return (
-    <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+    <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <svg
-            className="h-5 w-5 text-amber-600"
+            className="h-5 w-5 text-amber-400"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -68,7 +68,7 @@ export function UsFilterStatus({ stats, filterMode }: UsFilterStatusProps) {
               d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
             />
           </svg>
-          <span className="text-sm font-medium text-amber-800">
+          <span className="text-sm font-medium text-amber-300">
             US Location Filter:{" "}
             <Badge variant="warning" className="ml-1">
               {filterModeLabels[filterMode]}
@@ -78,35 +78,35 @@ export function UsFilterStatus({ stats, filterMode }: UsFilterStatusProps) {
 
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <span className="flex items-center gap-1.5">
-            <span className="inline-block h-2.5 w-2.5 rounded-full bg-green-500" />
-            <span className="font-semibold text-green-700">
+            <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />
+            <span className="font-semibold text-emerald-400">
               {formatNumber(customersInUsTrue)}
             </span>
-            <span className="text-gray-600">in US</span>
+            <span className="text-muted">in US</span>
           </span>
 
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-2.5 w-2.5 rounded-full bg-red-500" />
-            <span className="font-semibold text-red-700">
+            <span className="font-semibold text-red-400">
               {formatNumber(customersInUsFalse)}
             </span>
-            <span className="text-gray-600">outside US</span>
+            <span className="text-muted">outside US</span>
           </span>
 
           <span className="flex items-center gap-1.5">
-            <span className="inline-block h-2.5 w-2.5 rounded-full bg-gray-400" />
-            <span className="font-semibold text-gray-700">
+            <span className="inline-block h-2.5 w-2.5 rounded-full bg-gray-500" />
+            <span className="font-semibold text-muted-light">
               {formatNumber(customersInUsUnknown)}
             </span>
-            <span className="text-gray-600">unknown</span>
+            <span className="text-muted">unknown</span>
           </span>
         </div>
       </div>
 
-      <div className="mt-3 rounded-lg bg-white/60 px-3 py-2">
-        <p className="text-xs text-amber-700">
+      <div className="mt-3 rounded-lg bg-dark-bg-tertiary/50 px-3 py-2 border border-dark-border">
+        <p className="text-xs text-amber-200">
           <span className="font-semibold">Included:</span>{" "}
-          <span className="text-green-700 font-medium">
+          <span className="text-emerald-400 font-medium">
             {formatNumber(includedCount)} customers
           </span>{" "}
           ({includedLabel})
@@ -114,7 +114,7 @@ export function UsFilterStatus({ stats, filterMode }: UsFilterStatusProps) {
             <>
               {" · "}
               <span className="font-semibold">Excluded:</span>{" "}
-              <span className="text-red-700 font-medium">
+              <span className="text-red-400 font-medium">
                 {formatNumber(excludedCount)} customers
               </span>{" "}
               ({excludedLabel})
@@ -122,7 +122,7 @@ export function UsFilterStatus({ stats, filterMode }: UsFilterStatusProps) {
           )}
         </p>
         {filterMode === "strict" && customersInUsUnknown > 0 && (
-          <p className="mt-1 text-xs text-amber-600">
+          <p className="mt-1 text-xs text-amber-300/80">
             ⚠️ {formatNumber(customersInUsUnknown)} customers have no location data
             (book/fee-only activity or online merchants). Consider &quot;Lenient&quot; mode
             to include them.

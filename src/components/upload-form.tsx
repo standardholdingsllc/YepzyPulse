@@ -19,8 +19,28 @@ export function UploadForm() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
+  const [isDragging, setIsDragging] = useState(false);
   const csvInputRef = useRef<HTMLInputElement>(null);
   const mappingInputRef = useRef<HTMLInputElement>(null);
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file && file.name.endsWith(".csv")) {
+      setCsvFile(file);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,25 +100,37 @@ export function UploadForm() {
         </CardHeader>
         <CardContent>
           <div
-            className="relative flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-8 transition-colors hover:border-brand-400 hover:bg-brand-50/30 cursor-pointer"
+            className={`relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-10 transition-all cursor-pointer ${
+              isDragging
+                ? "border-accent bg-accent/10"
+                : csvFile
+                  ? "border-accent/50 bg-accent/5"
+                  : "border-dark-border hover:border-accent/50 hover:bg-dark-bg-tertiary/50"
+            }`}
             onClick={() => csvInputRef.current?.click()}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
           >
-            <svg className="mb-3 h-10 w-10 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-            </svg>
+            <div className={`mb-4 rounded-full p-3 ${csvFile ? "bg-accent/20" : "bg-dark-bg-tertiary"}`}>
+              <svg className={`h-8 w-8 ${csvFile ? "text-accent" : "text-muted"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+            </div>
             {csvFile ? (
               <div className="text-center">
-                <p className="text-sm font-medium text-brand-600">{csvFile.name}</p>
-                <p className="mt-1 text-xs text-gray-500">
+                <p className="text-sm font-medium text-accent">{csvFile.name}</p>
+                <p className="mt-1 text-xs text-muted">
                   {(csvFile.size / 1024 / 1024).toFixed(2)} MB
                 </p>
               </div>
             ) : (
               <div className="text-center">
-                <p className="text-sm text-gray-600">
-                  <span className="font-medium text-brand-600">Click to upload</span> or drag and drop
+                <p className="text-sm text-muted-light">
+                  <span className="font-medium text-accent">Drag & drop</span> a CSV here
                 </p>
-                <p className="mt-1 text-xs text-gray-500">CSV files only</p>
+                <p className="mt-2 text-xs text-muted">or<span className="text-accent ml-1">Browse Files</span></p>
+                <p className="mt-3 text-xs text-muted/70">CSV files only • Max 50MB</p>
               </div>
             )}
             <input
@@ -122,24 +154,28 @@ export function UploadForm() {
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
-            <label className="flex items-start gap-3 rounded-lg border border-gray-200 p-4 cursor-pointer hover:bg-gray-50 transition-colors">
+            <label className={`flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition-all ${
+              mappingSource === "official" 
+                ? "border-accent/50 bg-accent/5" 
+                : "border-dark-border hover:border-dark-border-hover hover:bg-dark-bg-tertiary/30"
+            }`}>
               <input
                 type="radio"
                 name="mappingSource"
                 value="official"
                 checked={mappingSource === "official"}
                 onChange={() => setMappingSource("official")}
-                className="mt-0.5 h-4 w-4 text-brand-600"
+                className="mt-0.5 h-4 w-4 accent-accent"
               />
               <div className="flex-1">
-                <p className="text-sm font-medium text-gray-900">Official Mapping (Recommended)</p>
-                <p className="text-xs text-gray-500 mt-1">
+                <p className="text-sm font-medium text-white">Official Mapping (Recommended)</p>
+                <p className="text-xs text-muted mt-1">
                   Fetches the latest customer→employer mapping from the{" "}
                   <a
                     href="https://github.com/standardholdingsllc/hubspot-address-mapper"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-brand-600 hover:underline"
+                    className="text-accent hover:underline"
                     onClick={(e) => e.stopPropagation()}
                   >
                     hubspot-address-mapper
@@ -147,47 +183,55 @@ export function UploadForm() {
                   repository
                 </p>
               </div>
-              <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
+              <span className="inline-flex items-center rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-xs font-medium text-emerald-400">
                 Auto-updated
               </span>
             </label>
-            <label className="flex items-start gap-3 rounded-lg border border-gray-200 p-4 cursor-pointer hover:bg-gray-50 transition-colors">
+            <label className={`flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition-all ${
+              mappingSource === "custom" 
+                ? "border-accent/50 bg-accent/5" 
+                : "border-dark-border hover:border-dark-border-hover hover:bg-dark-bg-tertiary/30"
+            }`}>
               <input
                 type="radio"
                 name="mappingSource"
                 value="custom"
                 checked={mappingSource === "custom"}
                 onChange={() => setMappingSource("custom")}
-                className="mt-0.5 h-4 w-4 text-brand-600"
+                className="mt-0.5 h-4 w-4 accent-accent"
               />
               <div>
-                <p className="text-sm font-medium text-gray-900">Custom Mapping</p>
-                <p className="text-xs text-gray-500 mt-1">Upload your own JSON file</p>
+                <p className="text-sm font-medium text-white">Custom Mapping</p>
+                <p className="text-xs text-muted mt-1">Upload your own JSON file</p>
               </div>
             </label>
 
             {/* Custom file upload (only shown when custom is selected) */}
             {mappingSource === "custom" && (
               <div
-                className="relative flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-6 transition-colors hover:border-brand-400 hover:bg-brand-50/30 cursor-pointer mt-3"
+                className={`relative flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 transition-all cursor-pointer mt-3 ${
+                  mappingFile
+                    ? "border-accent/50 bg-accent/5"
+                    : "border-dark-border hover:border-accent/50 hover:bg-dark-bg-tertiary/50"
+                }`}
                 onClick={() => mappingInputRef.current?.click()}
               >
-                <svg className="mb-2 h-8 w-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className={`mb-2 h-6 w-6 ${mappingFile ? "text-accent" : "text-muted"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
                 {mappingFile ? (
                   <div className="text-center">
-                    <p className="text-sm font-medium text-brand-600">{mappingFile.name}</p>
-                    <p className="mt-1 text-xs text-gray-500">
+                    <p className="text-sm font-medium text-accent">{mappingFile.name}</p>
+                    <p className="mt-1 text-xs text-muted">
                       {(mappingFile.size / 1024).toFixed(1)} KB
                     </p>
                   </div>
                 ) : (
                   <div className="text-center">
-                    <p className="text-sm text-gray-600">
-                      <span className="font-medium text-brand-600">Click to upload</span> JSON file
+                    <p className="text-sm text-muted-light">
+                      <span className="font-medium text-accent">Click to upload</span> JSON file
                     </p>
-                    <p className="mt-1 text-xs text-gray-500">Format: {`{"customerId": "Employer Name", ...}`}</p>
+                    <p className="mt-1 text-xs text-muted">{`{"customerId": "Employer Name", ...}`}</p>
                   </div>
                 )}
                 <input
@@ -213,68 +257,53 @@ export function UploadForm() {
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
-            <label className="flex items-start gap-3 rounded-lg border border-gray-200 p-4 cursor-pointer hover:bg-gray-50 transition-colors">
-              <input
-                type="radio"
-                name="inUsFilter"
-                value="strict"
-                checked={inUsFilter === "strict"}
-                onChange={() => setInUsFilter("strict")}
-                className="mt-0.5 h-4 w-4 text-brand-600"
-              />
-              <div>
-                <p className="text-sm font-medium text-gray-900">Strict — Only confirmed US</p>
-                <p className="text-xs text-gray-500">Only include customers with a recent US location</p>
-              </div>
-            </label>
-            <label className="flex items-start gap-3 rounded-lg border border-gray-200 p-4 cursor-pointer hover:bg-gray-50 transition-colors">
-              <input
-                type="radio"
-                name="inUsFilter"
-                value="lenient"
-                checked={inUsFilter === "lenient"}
-                onChange={() => setInUsFilter("lenient")}
-                className="mt-0.5 h-4 w-4 text-brand-600"
-              />
-              <div>
-                <p className="text-sm font-medium text-gray-900">Lenient — Include unknowns</p>
-                <p className="text-xs text-gray-500">Include US-confirmed and customers with no location data</p>
-              </div>
-            </label>
-            <label className="flex items-start gap-3 rounded-lg border border-gray-200 p-4 cursor-pointer hover:bg-gray-50 transition-colors">
-              <input
-                type="radio"
-                name="inUsFilter"
-                value="all"
-                checked={inUsFilter === "all"}
-                onChange={() => setInUsFilter("all")}
-                className="mt-0.5 h-4 w-4 text-brand-600"
-              />
-              <div>
-                <p className="text-sm font-medium text-gray-900">All — No filtering</p>
-                <p className="text-xs text-gray-500">Include all customers regardless of location</p>
-              </div>
-            </label>
+            {[
+              { value: "strict", label: "Strict — Only confirmed US", desc: "Only include customers with a recent US location" },
+              { value: "lenient", label: "Lenient — Include unknowns", desc: "Include US-confirmed and customers with no location data" },
+              { value: "all", label: "All — No filtering", desc: "Include all customers regardless of location" },
+            ].map((option) => (
+              <label
+                key={option.value}
+                className={`flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition-all ${
+                  inUsFilter === option.value
+                    ? "border-accent/50 bg-accent/5"
+                    : "border-dark-border hover:border-dark-border-hover hover:bg-dark-bg-tertiary/30"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="inUsFilter"
+                  value={option.value}
+                  checked={inUsFilter === option.value}
+                  onChange={() => setInUsFilter(option.value as InUsFilter)}
+                  className="mt-0.5 h-4 w-4 accent-accent"
+                />
+                <div>
+                  <p className="text-sm font-medium text-white">{option.label}</p>
+                  <p className="text-xs text-muted">{option.desc}</p>
+                </div>
+              </label>
+            ))}
           </div>
         </CardContent>
       </Card>
 
       {/* Error */}
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4">
-          <p className="text-sm text-red-700">{error}</p>
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4">
+          <p className="text-sm text-red-400">{error}</p>
         </div>
       )}
 
       {/* Progress */}
       {isProcessing && progress && (
-        <div className="rounded-lg border border-brand-200 bg-brand-50 p-4">
+        <div className="rounded-lg border border-accent/30 bg-accent/10 p-4">
           <div className="flex items-center gap-3">
-            <svg className="h-5 w-5 animate-spin text-brand-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <svg className="h-5 w-5 animate-spin text-accent" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
             </svg>
-            <p className="text-sm font-medium text-brand-700">{progress}</p>
+            <p className="text-sm font-medium text-accent">{progress}</p>
           </div>
         </div>
       )}
@@ -283,10 +312,14 @@ export function UploadForm() {
       <button
         type="submit"
         disabled={isProcessing || !csvFile}
-        className="w-full rounded-lg bg-brand-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+        className="w-full rounded-xl bg-accent px-6 py-4 text-sm font-semibold text-white shadow-glow transition-all hover:bg-accent-hover hover:shadow-glow disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
       >
         {isProcessing ? "Processing..." : "Generate Report"}
       </button>
+
+      <p className="text-center text-xs text-muted">
+        Files are processed in your browser and on the server. Nothing is stored permanently.
+      </p>
     </form>
   );
 }

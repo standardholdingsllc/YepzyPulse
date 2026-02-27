@@ -102,12 +102,12 @@ export function EmployersTable({ rollups, slug }: EmployersTableProps) {
               placeholder="Search employers..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              className="rounded-lg border border-dark-border bg-dark-bg-tertiary px-3 py-1.5 text-sm text-white placeholder:text-muted focus:border-accent focus:outline-none"
             />
             <select
               value={filterRemittance}
               onChange={(e) => setFilterRemittance(e.target.value as "all" | "yes" | "no")}
-              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+              className="rounded-lg border border-dark-border bg-dark-bg-tertiary px-3 py-1.5 text-sm text-white focus:border-accent focus:outline-none"
             >
               <option value="all">All employers</option>
               <option value="yes">Has remittance</option>
@@ -119,33 +119,33 @@ export function EmployersTable({ rollups, slug }: EmployersTableProps) {
       <CardContent className="overflow-x-auto p-0">
         <table className="min-w-full text-sm">
           <thead>
-            <tr className="border-b bg-gray-50 text-left">
+            <tr className="border-b border-dark-border bg-dark-bg-tertiary/50 text-left">
               {columns.map((col) => (
                 <th
                   key={col.key}
-                  className={`cursor-pointer select-none whitespace-nowrap px-4 py-3 font-medium text-gray-600 hover:text-gray-900 ${
+                  className={`cursor-pointer select-none whitespace-nowrap px-4 py-3 font-medium text-muted hover:text-white transition-colors ${
                     col.align === "right" ? "text-right" : ""
                   }`}
                   onClick={() => handleSort(col.key)}
                 >
                   {col.label}{" "}
-                  <span className="text-xs text-gray-400">
+                  <span className="text-xs text-muted/50">
                     {sortIcon(col.key)}
                   </span>
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody className="divide-y divide-dark-border">
             {filtered.map((r) => (
               <tr
                 key={r.employerKey}
-                className="hover:bg-gray-50 transition-colors"
+                className="table-row-hover transition-colors"
               >
                 <td className="px-4 py-3">
                   <Link
                     href={`/r/${slug}/employer/${encodeURIComponent(r.employerKey)}`}
-                    className="font-medium text-brand-600 hover:text-brand-800 hover:underline"
+                    className="font-medium text-accent hover:text-accent-light hover:underline"
                   >
                     {r.employerName}
                   </Link>
@@ -161,37 +161,37 @@ export function EmployersTable({ rollups, slug }: EmployersTableProps) {
                     )}
                   </div>
                 </td>
-                <td className="px-4 py-3 text-right tabular-nums">
+                <td className="px-4 py-3 text-right tabular-nums text-muted-light">
                   {formatNumber(r.workerCount)}
                 </td>
-                <td className="px-4 py-3 text-right tabular-nums">
+                <td className="px-4 py-3 text-right tabular-nums text-muted-light">
                   {formatNumber(r.transactionCount)}
                 </td>
-                <td className="px-4 py-3 text-right tabular-nums font-medium">
+                <td className="px-4 py-3 text-right tabular-nums font-medium text-white">
                   {formatCents(r.totalDebitCents)}
                 </td>
-                <td className="px-4 py-3 text-right tabular-nums">
+                <td className="px-4 py-3 text-right tabular-nums text-muted-light">
                   {formatCents(r.cardAmountCents)}
                 </td>
-                <td className="px-4 py-3 text-right tabular-nums">
+                <td className="px-4 py-3 text-right tabular-nums text-muted-light">
                   {formatCents(r.atmAmountCents)}
                 </td>
-                <td className="px-4 py-3 text-right tabular-nums">
+                <td className="px-4 py-3 text-right tabular-nums text-muted-light">
                   {formatCents(r.feeAmountCents)}
                 </td>
-                <td className="px-4 py-3 text-right tabular-nums font-medium text-purple-600">
+                <td className="px-4 py-3 text-right tabular-nums font-medium text-violet-400">
                   {r.remittanceAmountCents > 0
                     ? formatCents(r.remittanceAmountCents)
-                    : "—"}
+                    : <span className="text-muted/50">—</span>}
                 </td>
-                <td className="px-4 py-3 text-right tabular-nums">
-                  {r.remittanceCount > 0 ? formatNumber(r.remittanceCount) : "—"}
+                <td className="px-4 py-3 text-right tabular-nums text-muted-light">
+                  {r.remittanceCount > 0 ? formatNumber(r.remittanceCount) : <span className="text-muted/50">—</span>}
                 </td>
               </tr>
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={columns.length} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={columns.length} className="px-4 py-8 text-center text-muted">
                   No employers found
                 </td>
               </tr>
