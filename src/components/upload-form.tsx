@@ -99,7 +99,9 @@ export function UploadForm() {
       log("setup", `Storage path: ${storagePath}, bucket: ${bucket}`);
 
       // 2. Upload via TUS resumable protocol
-      const tusEndpoint = `${supabaseUrl}/storage/v1/upload/resumable`;
+      // Extract project ID from supabaseUrl (e.g., https://abc123.supabase.co -> abc123)
+      const projectId = new URL(supabaseUrl).hostname.split(".")[0];
+      const tusEndpoint = `https://${projectId}.supabase.co/storage/v1/upload/resumable`;
       log("tus", `TUS endpoint: ${tusEndpoint}, chunk size: ${TUS_CHUNK_SIZE / 1024 / 1024}MB`);
 
       const storagPathForTus = await new Promise<string>((resolve, reject) => {
@@ -114,6 +116,9 @@ export function UploadForm() {
           reject(new Error(`Upload timed out after ${UPLOAD_TOTAL_TIMEOUT_MS / 1000}s`));
         }, UPLOAD_TOTAL_TIMEOUT_MS);
 
+        const fileContentType = csvFile!.type || "text/csv";
+        log("tus", `File metadata: size=${csvFile!.size}, contentType=${fileContentType}`);
+
         const tusUpload = new tus.Upload(csvFile!, {
           endpoint: tusEndpoint,
           retryDelays: [0, 1000, 3000, 5000, 10000, 20000],
@@ -127,8 +132,14 @@ export function UploadForm() {
           metadata: {
             bucketName: bucket,
             objectName: storagePath,
-            contentType: csvFile!.type || "text/csv",
+            contentType: fileContentType,
             cacheControl: "3600",
+          },
+          onBeforeRequest: (req) => {
+            log("tus", `Request: ${req.getMethod()} ${req.getURL()}`);
+          },
+          onAfterResponse: (req, res) => {
+            log("tus", `Response: ${res.getStatus()} for ${req.getMethod()}`);
           },
           onError: (err) => {
             clearTimeout(totalTimer);

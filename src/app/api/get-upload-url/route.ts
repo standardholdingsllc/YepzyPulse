@@ -9,6 +9,9 @@
  *
  * The client then uses tus-js-client to upload directly to Supabase Storage's
  * TUS resumable-upload endpoint, which reliably handles files of any size.
+ *
+ * IMPORTANT: Requires RLS INSERT policy on storage.objects for the csv-uploads bucket.
+ * Also requires the global file size limit in Supabase Storage Settings to be >= 500MB.
  */
 
 import { NextRequest, NextResponse } from "next/server";
