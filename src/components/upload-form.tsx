@@ -43,6 +43,10 @@ export function UploadForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isProcessing) {
+      return;
+    }
+
     if (!csvFile) {
       setError("Please select a CSV file");
       return;
@@ -66,12 +70,17 @@ export function UploadForm() {
         // Large file: use client upload directly to Vercel Blob
         setProgress(`Uploading file (${fileSizeMB.toFixed(1)}MB)...`);
 
+        const safeFilename = csvFile.name.replace(/[^a-zA-Z0-9._-]/g, "-");
+        const pathname = `csv-uploads/${Date.now()}-${safeFilename}`;
+
         // Upload directly to Vercel Blob from the client
-        const blob = await upload(csvFile.name, csvFile, {
+        const blob = await upload(pathname, csvFile, {
           access: "public",
           handleUploadUrl: "/api/upload-csv",
+          multipart: true,
+          contentType: csvFile.type || "text/csv",
           onUploadProgress: (progressEvent) => {
-            const percent = Math.round((progressEvent.loaded / progressEvent.total) * 100);
+            const percent = Math.round(progressEvent.percentage);
             setUploadProgress(percent);
             setProgress(`Uploading file... ${percent}%`);
           },
@@ -159,7 +168,6 @@ export function UploadForm() {
                   ? "border-accent/50 bg-accent/5"
                   : "border-dark-border hover:border-accent/50 hover:bg-dark-bg-tertiary/50"
             }`}
-            onClick={() => csvInputRef.current?.click()}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
@@ -189,7 +197,7 @@ export function UploadForm() {
               ref={csvInputRef}
               type="file"
               accept=".csv"
-              className="absolute inset-0 cursor-pointer opacity-0"
+              className="absolute inset-0 z-10 cursor-pointer opacity-0"
               onChange={(e) => setCsvFile(e.target.files?.[0] || null)}
             />
           </div>

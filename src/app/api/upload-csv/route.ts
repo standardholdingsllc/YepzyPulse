@@ -1,12 +1,8 @@
 /**
- * API endpoint that handles the server-side part of client uploads to Vercel Blob.
- * 
- * For client uploads, the flow is:
- * 1. Client calls this endpoint to get a signed upload URL
- * 2. Client uploads directly to Vercel Blob (bypassing the 4.5MB function limit)
- * 3. Client calls /api/start-processing with the blob URL
- * 
- * This endpoint handles the handleUpload callback from @vercel/blob/client
+ * API endpoint for generating client-upload tokens for Vercel Blob.
+ *
+ * We intentionally do not use the onUploadCompleted callback here because
+ * the app starts processing via /api/start-processing after upload() resolves.
  */
 
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
@@ -20,26 +16,26 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       body,
       request,
       onBeforeGenerateToken: async (pathname) => {
-        // Validate the upload before generating a token
-        // You can add authentication checks here
+        // Basic validation to keep uploads scoped to CSV-like files.
+        const normalized = pathname.toLowerCase();
+        if (!normalized.endsWith(".csv")) {
+          throw new Error("Only CSV files are allowed");
+        }
+
         console.log(`[Upload] Generating token for: ${pathname}`);
-        
+
         return {
-          allowedContentTypes: ["text/csv", "application/csv", "text/plain"],
+          // Keep this broad enough for browser/OS CSV mime variations.
+          allowedContentTypes: [
+            "text/csv",
+            "application/csv",
+            "application/vnd.ms-excel",
+            "text/plain",
+            "application/octet-stream",
+          ],
           maximumSizeInBytes: 500 * 1024 * 1024, // 500MB max
-          tokenPayload: JSON.stringify({
-            // You can add custom data here that will be available in onUploadCompleted
-          }),
+          addRandomSuffix: true,
         };
-      },
-      onUploadCompleted: async ({ blob, tokenPayload }) => {
-        // This is called after the file is uploaded to Vercel Blob
-        // Note: This won't be called if the upload is done from localhost
-        console.log(`[Upload] Upload completed: ${blob.url}`);
-        console.log(`[Upload] Token payload: ${tokenPayload}`);
-        
-        // We don't create the report here - the client will call /api/start-processing
-        // This is because we need the inUsFilter from the client
       },
     });
 
