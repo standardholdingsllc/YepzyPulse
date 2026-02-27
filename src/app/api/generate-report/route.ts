@@ -43,8 +43,16 @@ function resolveInUsFilter(value: unknown): InUsFilterMode {
   return "strict";
 }
 
-function normalizeStoragePath(value: string): string {
-  return value.trim().replace(/^\/+/, "");
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value);
+}
+
+function normalizeFileReference(value: string): string {
+  const trimmed = value.trim();
+  if (isHttpUrl(trimmed)) {
+    return trimmed;
+  }
+  return trimmed.replace(/^\/+/, "");
 }
 
 export async function POST(request: NextRequest) {
@@ -56,23 +64,26 @@ export async function POST(request: NextRequest) {
         (typeof body.storagePath === "string" && body.storagePath) ||
         (typeof body.blobUrl === "string" && body.blobUrl) ||
         "";
-      const storagePath = normalizeStoragePath(requestedPath);
+      const fileReference = normalizeFileReference(requestedPath);
       const inUsFilter = resolveInUsFilter(body.options?.inUsFilter ?? body.inUsFilter);
 
-      if (!storagePath) {
+      if (!fileReference) {
         return NextResponse.json(
           { error: "blobUrl or storagePath is required" },
           { status: 400 }
         );
       }
 
-      console.log(`[API] Starting async report generation for storage path: ${storagePath}`);
+      console.log(`[API] Starting async report generation for file reference: ${fileReference}`);
 
       const startProcessingUrl = new URL("/api/start-processing", request.url);
+      const startPayload = isHttpUrl(fileReference)
+        ? { blobUrl: fileReference, inUsFilter }
+        : { storagePath: fileReference, inUsFilter };
       const startProcessingResponse = await fetch(startProcessingUrl.toString(), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ storagePath, inUsFilter }),
+        body: JSON.stringify(startPayload),
       });
 
       if (!startProcessingResponse.ok) {

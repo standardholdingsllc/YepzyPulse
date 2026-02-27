@@ -1,8 +1,9 @@
 /**
- * API endpoint to start background processing after a file has been uploaded to Supabase Storage.
- * 
- * This is called by the client after the storage upload completes.
- * It creates the report record and triggers background processing.
+ * API endpoint to start background processing after a file has been uploaded.
+ *
+ * Supports either:
+ * - blobUrl (public Vercel Blob URL)
+ * - storagePath (Supabase Storage path)
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -11,18 +12,30 @@ import { generateSlug } from "@/lib/utils";
 import type { InUsFilterMode } from "@/lib/types";
 
 interface StartProcessingRequest {
-  storagePath: string;
+  blobUrl?: string;
+  storagePath?: string;
   inUsFilter: InUsFilterMode;
+}
+
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value);
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body: StartProcessingRequest = await request.json();
-    const { storagePath, inUsFilter } = body;
+    const inUsFilter = body.inUsFilter;
+    const fileReference =
+      (typeof body.blobUrl === "string" && body.blobUrl.trim()) ||
+      (typeof body.storagePath === "string" && body.storagePath.trim()) ||
+      "";
+    const normalizedReference = isHttpUrl(fileReference)
+      ? fileReference
+      : fileReference.replace(/^\/+/, "");
 
-    if (!storagePath) {
+    if (!normalizedReference) {
       return NextResponse.json(
-        { error: "Storage path is required" },
+        { error: "blobUrl or storagePath is required" },
         { status: 400 }
       );
     }
@@ -30,7 +43,7 @@ export async function POST(request: NextRequest) {
     // Generate slug for the report
     const slug = generateSlug(12);
 
-    console.log(`[StartProcessing] Creating report ${slug} for storage path: ${storagePath}`);
+    console.log(`[StartProcessing] Creating report ${slug} for file reference: ${normalizedReference}`);
 
     // Create report record in "processing" state
     const supabase = createServiceClient();
@@ -43,7 +56,7 @@ export async function POST(request: NextRequest) {
         in_us_filter: inUsFilter,
         classification_rules: {},
         stats: {},
-        csv_blob_url: storagePath, // Re-use the column; now stores a Supabase Storage path
+        csv_blob_url: normalizedReference,
       })
       .select("id")
       .single();
@@ -68,7 +81,9 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify({
         reportId: report.id,
         slug,
-        storagePath,
+        blobUrl: isHttpUrl(normalizedReference) ? normalizedReference : undefined,
+        storagePath: isHttpUrl(normalizedReference) ? undefined : normalizedReference,
+        fileReference: normalizedReference,
         inUsFilter,
       }),
     }).catch((err) => {

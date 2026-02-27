@@ -3,6 +3,7 @@
 import { useState, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useRouter } from "next/navigation";
+import { upload } from "@vercel/blob/client";
 
 type InUsFilter = "strict" | "lenient" | "all";
 
@@ -37,8 +38,9 @@ export function UploadForm() {
     }
   };
 
-  // All uploads go to storage first; no CSV payloads are sent to app API routes.
-  const MAX_FILE_SIZE_MB = 500; // Max file size supported with storage upload
+  // All uploads go to blob storage first; no CSV payloads are sent to app API routes.
+  const MAX_FILE_SIZE_MB = 500; // Max file size supported
+  const UPLOAD_IDLE_TIMEOUT_MS = 90_000;
   const UPLOAD_TOTAL_TIMEOUT_MS = 10 * 60 * 1000; // 10 minute hard cap
 
   /** Structured client-side logger that timestamps every upload event. */
@@ -50,68 +52,6 @@ export function UploadForm() {
     } else {
       console.log(`${ts} ${prefix} ${msg}`);
     }
-  };
-
-  /**
-   * Upload a file to Supabase Storage using a signed URL.
-   * Uses XMLHttpRequest for upload progress tracking.
-   */
-  const uploadToStorage = (
-    uploadUrl: string,
-    file: File,
-    contentType: string,
-    onProgress: (percent: number) => void,
-    abortSignal: AbortSignal,
-  ): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-
-      // Wire up abort signal
-      const onAbort = () => {
-        xhr.abort();
-        reject(new Error("Upload aborted"));
-      };
-      abortSignal.addEventListener("abort", onAbort, { once: true });
-
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) {
-          onProgress(Math.round((e.loaded / e.total) * 100));
-        }
-      };
-
-      xhr.onload = () => {
-        abortSignal.removeEventListener("abort", onAbort);
-        if (xhr.status >= 200 && xhr.status < 300) {
-          resolve();
-        } else {
-          let errorMsg = `Storage upload failed (${xhr.status})`;
-          try {
-            const body = JSON.parse(xhr.responseText);
-            if (body.error || body.message) {
-              errorMsg = body.error || body.message;
-            }
-          } catch {
-            // ignore parse errors
-          }
-          reject(new Error(errorMsg));
-        }
-      };
-
-      xhr.onerror = () => {
-        abortSignal.removeEventListener("abort", onAbort);
-        reject(new Error("Network error during upload"));
-      };
-
-      xhr.ontimeout = () => {
-        abortSignal.removeEventListener("abort", onAbort);
-        reject(new Error("Upload timed out"));
-      };
-
-      xhr.timeout = UPLOAD_TOTAL_TIMEOUT_MS;
-      xhr.open("PUT", uploadUrl, true);
-      xhr.setRequestHeader("Content-Type", contentType);
-      xhr.send(file);
-    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -136,74 +76,137 @@ export function UploadForm() {
     setUploadProgress(0);
 
     const fileSizeMB = csvFile.size / 1024 / 1024;
-    log("init", `Starting upload – size: ${fileSizeMB.toFixed(1)}MB, type: "${csvFile.type}", mode: storage-first`);
+    log("init", `Starting upload – size: ${fileSizeMB.toFixed(1)}MB, type: "${csvFile.type}", mode: blob-upload`);
 
     try {
-      // 1. Upload to storage via signed URL
+      // 1. Upload to Vercel Blob directly from the browser
       setProgress(`Uploading file (${fileSizeMB.toFixed(1)}MB)...`);
       setIsUploading(true);
 
-      log("storage", "Requesting signed upload URL...");
-      const urlResponse = await fetch("/api/get-upload-url", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filename: csvFile.name }),
-      });
+      const safeFilename = csvFile.name.replace(/[^a-zA-Z0-9._-]/g, "-");
+      const pathname = `csv-uploads/${Date.now()}-${safeFilename}`;
+      log("blob", `Pathname: ${pathname}, safe filename: ${safeFilename}`);
 
-      if (!urlResponse.ok) {
-        const errData = await urlResponse.json().catch(() => ({}));
-        throw new Error(errData.error || `Failed to get upload URL (${urlResponse.status})`);
-      }
+      const uploadWithWatchdog = async (multipart: boolean) => {
+        const mode = multipart ? "multipart" : "single-put";
+        log(mode, `Starting ${mode} upload…`);
 
-      const { uploadUrl, signedUrl, path: storagePath } = await urlResponse.json();
-      const resolvedUploadUrl: string | undefined = uploadUrl || signedUrl;
+        const controller = new AbortController();
+        let idleTimer: ReturnType<typeof setTimeout> | null = null;
+        let totalTimer: ReturnType<typeof setTimeout> | null = null;
+        let lastLoaded = -1;
+        let progressEventCount = 0;
+        const startTime = Date.now();
 
-      if (!resolvedUploadUrl) {
-        throw new Error("Upload URL missing from server response");
-      }
+        const clearIdleTimer = () => {
+          if (idleTimer) {
+            clearTimeout(idleTimer);
+            idleTimer = null;
+          }
+        };
 
-      log("storage", `Got upload URL for path: ${storagePath}`);
+        const resetIdleTimer = () => {
+          clearIdleTimer();
+          idleTimer = setTimeout(() => {
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+            log(mode, `Idle timeout after ${elapsed}s – no progress for ${UPLOAD_IDLE_TIMEOUT_MS / 1000}s. Aborting.`, {
+              lastLoaded,
+              progressEventCount,
+            });
+            controller.abort();
+          }, UPLOAD_IDLE_TIMEOUT_MS);
+        };
 
-      const controller = new AbortController();
-      const totalTimer = setTimeout(() => {
-        log("storage", `Total timeout after ${UPLOAD_TOTAL_TIMEOUT_MS / 1000}s. Aborting.`);
-        controller.abort();
-      }, UPLOAD_TOTAL_TIMEOUT_MS);
+        totalTimer = setTimeout(() => {
+          const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+          log(mode, `Total timeout after ${elapsed}s. Aborting.`, {
+            lastLoaded,
+            progressEventCount,
+          });
+          controller.abort();
+        }, UPLOAD_TOTAL_TIMEOUT_MS);
 
-      const startTime = Date.now();
+        resetIdleTimer();
+
+        try {
+          const blob = await upload(pathname, csvFile, {
+            access: "public",
+            handleUploadUrl: "/api/upload-csv",
+            multipart,
+            contentType: csvFile.type || "text/csv",
+            abortSignal: controller.signal,
+            onUploadProgress: (progressEvent) => {
+              progressEventCount++;
+              if (progressEvent.loaded > lastLoaded) {
+                lastLoaded = progressEvent.loaded;
+                resetIdleTimer();
+              }
+              const percent = Math.round(progressEvent.percentage);
+              setUploadProgress(percent);
+              setProgress(`Uploading file… ${percent}%`);
+
+              if (progressEventCount <= 3 || progressEventCount % 10 === 0 || percent >= 100) {
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+                log(mode, `Progress: ${percent}% (${(progressEvent.loaded / 1024 / 1024).toFixed(1)}MB) – event #${progressEventCount} – ${elapsed}s elapsed`);
+              }
+            },
+          });
+
+          const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+          log(mode, `Upload completed in ${elapsed}s`, {
+            url: blob.url,
+            pathname: blob.pathname,
+            contentType: blob.contentType,
+            progressEvents: progressEventCount,
+          });
+          return blob;
+        } catch (uploadErr) {
+          const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+          const errMsg = uploadErr instanceof Error ? uploadErr.message : String(uploadErr);
+          const errStack = uploadErr instanceof Error ? uploadErr.stack : undefined;
+          log(mode, `Upload FAILED after ${elapsed}s: ${errMsg}`, {
+            progressEvents: progressEventCount,
+            lastLoaded,
+            stack: errStack,
+          });
+          throw uploadErr;
+        } finally {
+          clearIdleTimer();
+          if (totalTimer) {
+            clearTimeout(totalTimer);
+            totalTimer = null;
+          }
+        }
+      };
+
+      let blob;
       try {
-        await uploadToStorage(
-          resolvedUploadUrl,
-          csvFile,
-          csvFile.type || "text/csv",
-          (percent) => {
-            setUploadProgress(percent);
-            setProgress(`Uploading file… ${percent}%`);
-            if (percent % 20 === 0 || percent >= 100) {
-              const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-              log("storage", `Progress: ${percent}% – ${elapsed}s elapsed`);
-            }
-          },
-          controller.signal,
-        );
-      } finally {
-        clearTimeout(totalTimer);
-      }
+        blob = await uploadWithWatchdog(true);
+      } catch (firstErr) {
+        const message = firstErr instanceof Error ? firstErr.message : String(firstErr);
+        const looksStalled = message.toLowerCase().includes("aborted") || message.toLowerCase().includes("abort");
+        log("retry", `First attempt error: "${message}", looksStalled: ${looksStalled}`);
+        if (!looksStalled) {
+          throw firstErr;
+        }
 
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      log("storage", `Upload completed in ${elapsed}s, storagePath: ${storagePath}`);
+        setUploadProgress(0);
+        setProgress("Upload stalled. Retrying in compatibility mode…");
+        log("retry", "Falling back to single-PUT upload mode");
+        blob = await uploadWithWatchdog(false);
+      }
 
       setProgress("File uploaded! Starting processing…");
       setUploadProgress(100);
       setIsUploading(false);
 
       // 2. Start processing with a small JSON payload only (no CSV body)
-      log("process", `Calling /api/generate-report with storagePath: ${storagePath}`);
+      log("process", `Calling /api/generate-report with blobUrl: ${blob.url}`);
       const response = await fetch("/api/generate-report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          blobUrl: storagePath,
+          blobUrl: blob.url,
           options: { inUsFilter },
         }),
       });
@@ -364,7 +367,7 @@ export function UploadForm() {
               )}
               {isUploading && uploadProgress === 0 && (
                 <p className="mt-1.5 text-xs text-muted">
-                  Establishing connection to storage… (check browser console for details)
+                  Establishing connection to upload service… (check browser console for details)
                 </p>
               )}
             </div>
