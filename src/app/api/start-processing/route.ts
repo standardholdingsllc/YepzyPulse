@@ -49,9 +49,16 @@ export async function POST(request: NextRequest) {
 
     console.log(`[StartProcessing] Creating report ${slug} for file reference: ${normalizedReference}`);
 
-    // Create report record in "processing" state with processing_started_at timestamp
+    // Create report record in "processing" state
+    // Note: processing_started_at requires migration 006 to be run
     const supabase = createServiceClient();
-    const { data: report, error: reportError } = await supabase
+    const processingStartedAt = new Date().toISOString();
+    
+    // Try with processing_started_at first, fall back without it if column doesn't exist
+    let report: { id: string } | null = null;
+    let reportError: Error | null = null;
+    
+    const { data: reportData, error: insertError } = await supabase
       .from("reports")
       .insert({
         slug,
@@ -61,10 +68,33 @@ export async function POST(request: NextRequest) {
         classification_rules: {},
         stats: {},
         csv_blob_url: normalizedReference,
-        processing_started_at: new Date().toISOString(),
+        processing_started_at: processingStartedAt,
       })
       .select("id")
       .single();
+    
+    if (insertError?.message?.includes("processing_started_at")) {
+      // Column doesn't exist yet, retry without it
+      console.log("[StartProcessing] processing_started_at column not found, inserting without it");
+      const { data: fallbackData, error: fallbackError } = await supabase
+        .from("reports")
+        .insert({
+          slug,
+          title: `Report ${new Date().toISOString().split("T")[0]}`,
+          status: "processing",
+          in_us_filter: inUsFilter,
+          classification_rules: {},
+          stats: {},
+          csv_blob_url: normalizedReference,
+        })
+        .select("id")
+        .single();
+      report = fallbackData;
+      reportError = fallbackError as Error | null;
+    } else {
+      report = reportData;
+      reportError = insertError as Error | null;
+    }
 
     if (reportError || !report) {
       console.error("[StartProcessing] Failed to create report:", reportError);
