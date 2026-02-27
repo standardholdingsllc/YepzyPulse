@@ -3,7 +3,7 @@
 import { useState, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useRouter } from "next/navigation";
-import { upload } from "@vercel/blob/client";
+import * as tus from "tus-js-client";
 
 type InUsFilter = "strict" | "lenient" | "all";
 
@@ -38,9 +38,9 @@ export function UploadForm() {
     }
   };
 
-  // All uploads go to blob storage first; no CSV payloads are sent to app API routes.
+  // All uploads go to Supabase Storage via TUS resumable protocol.
   const MAX_FILE_SIZE_MB = 500; // Max file size supported
-  const UPLOAD_IDLE_TIMEOUT_MS = 90_000;
+  const TUS_CHUNK_SIZE = 6 * 1024 * 1024; // 6 MB – required by Supabase Storage
   const UPLOAD_TOTAL_TIMEOUT_MS = 10 * 60 * 1000; // 10 minute hard cap
 
   /** Structured client-side logger that timestamps every upload event. */
@@ -76,137 +76,111 @@ export function UploadForm() {
     setUploadProgress(0);
 
     const fileSizeMB = csvFile.size / 1024 / 1024;
-    log("init", `Starting upload – size: ${fileSizeMB.toFixed(1)}MB, type: "${csvFile.type}", mode: blob-upload`);
+    log("init", `Starting upload – size: ${fileSizeMB.toFixed(1)}MB, type: "${csvFile.type}", mode: tus-resumable`);
 
     try {
-      // 1. Upload to Vercel Blob directly from the browser
+      // 1. Get storage path and credentials from the server
       setProgress(`Uploading file (${fileSizeMB.toFixed(1)}MB)...`);
       setIsUploading(true);
 
-      const safeFilename = csvFile.name.replace(/[^a-zA-Z0-9._-]/g, "-");
-      const pathname = `csv-uploads/${Date.now()}-${safeFilename}`;
-      log("blob", `Pathname: ${pathname}, safe filename: ${safeFilename}`);
+      log("setup", "Requesting upload path from /api/get-upload-url");
+      const urlRes = await fetch("/api/get-upload-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: csvFile.name }),
+      });
 
-      const uploadWithWatchdog = async (multipart: boolean) => {
-        const mode = multipart ? "multipart" : "single-put";
-        log(mode, `Starting ${mode} upload…`);
+      if (!urlRes.ok) {
+        const urlErr = await urlRes.json().catch(() => ({}));
+        throw new Error(urlErr.error || `Failed to get upload URL (${urlRes.status})`);
+      }
 
-        const controller = new AbortController();
-        let idleTimer: ReturnType<typeof setTimeout> | null = null;
-        let totalTimer: ReturnType<typeof setTimeout> | null = null;
-        let lastLoaded = -1;
-        let progressEventCount = 0;
+      const { storagePath, supabaseUrl, anonKey, bucket } = await urlRes.json();
+      log("setup", `Storage path: ${storagePath}, bucket: ${bucket}`);
+
+      // 2. Upload via TUS resumable protocol
+      const tusEndpoint = `${supabaseUrl}/storage/v1/upload/resumable`;
+      log("tus", `TUS endpoint: ${tusEndpoint}, chunk size: ${TUS_CHUNK_SIZE / 1024 / 1024}MB`);
+
+      const storagPathForTus = await new Promise<string>((resolve, reject) => {
         const startTime = Date.now();
+        let progressEventCount = 0;
 
-        const clearIdleTimer = () => {
-          if (idleTimer) {
-            clearTimeout(idleTimer);
-            idleTimer = null;
-          }
-        };
-
-        const resetIdleTimer = () => {
-          clearIdleTimer();
-          idleTimer = setTimeout(() => {
-            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-            log(mode, `Idle timeout after ${elapsed}s – no progress for ${UPLOAD_IDLE_TIMEOUT_MS / 1000}s. Aborting.`, {
-              lastLoaded,
-              progressEventCount,
-            });
-            controller.abort();
-          }, UPLOAD_IDLE_TIMEOUT_MS);
-        };
-
-        totalTimer = setTimeout(() => {
+        // Hard timeout
+        const totalTimer = setTimeout(() => {
           const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-          log(mode, `Total timeout after ${elapsed}s. Aborting.`, {
-            lastLoaded,
-            progressEventCount,
-          });
-          controller.abort();
+          log("tus", `Total timeout after ${elapsed}s. Aborting.`);
+          tusUpload.abort(true);
+          reject(new Error(`Upload timed out after ${UPLOAD_TOTAL_TIMEOUT_MS / 1000}s`));
         }, UPLOAD_TOTAL_TIMEOUT_MS);
 
-        resetIdleTimer();
-
-        try {
-          const blob = await upload(pathname, csvFile, {
-            access: "public",
-            handleUploadUrl: "/api/upload-csv",
-            multipart,
-            contentType: csvFile.type || "text/csv",
-            abortSignal: controller.signal,
-            onUploadProgress: (progressEvent) => {
-              progressEventCount++;
-              if (progressEvent.loaded > lastLoaded) {
-                lastLoaded = progressEvent.loaded;
-                resetIdleTimer();
-              }
-              const percent = Math.round(progressEvent.percentage);
-              setUploadProgress(percent);
-              setProgress(`Uploading file… ${percent}%`);
-
-              if (progressEventCount <= 3 || progressEventCount % 10 === 0 || percent >= 100) {
-                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-                log(mode, `Progress: ${percent}% (${(progressEvent.loaded / 1024 / 1024).toFixed(1)}MB) – event #${progressEventCount} – ${elapsed}s elapsed`);
-              }
-            },
-          });
-
-          const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-          log(mode, `Upload completed in ${elapsed}s`, {
-            url: blob.url,
-            pathname: blob.pathname,
-            contentType: blob.contentType,
-            progressEvents: progressEventCount,
-          });
-          return blob;
-        } catch (uploadErr) {
-          const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-          const errMsg = uploadErr instanceof Error ? uploadErr.message : String(uploadErr);
-          const errStack = uploadErr instanceof Error ? uploadErr.stack : undefined;
-          log(mode, `Upload FAILED after ${elapsed}s: ${errMsg}`, {
-            progressEvents: progressEventCount,
-            lastLoaded,
-            stack: errStack,
-          });
-          throw uploadErr;
-        } finally {
-          clearIdleTimer();
-          if (totalTimer) {
+        const tusUpload = new tus.Upload(csvFile!, {
+          endpoint: tusEndpoint,
+          retryDelays: [0, 1000, 3000, 5000, 10000, 20000],
+          headers: {
+            authorization: `Bearer ${anonKey}`,
+            "x-upsert": "true",
+          },
+          uploadDataDuringCreation: true,
+          removeFingerprintOnSuccess: true,
+          chunkSize: TUS_CHUNK_SIZE,
+          metadata: {
+            bucketName: bucket,
+            objectName: storagePath,
+            contentType: csvFile!.type || "text/csv",
+            cacheControl: "3600",
+          },
+          onError: (err) => {
             clearTimeout(totalTimer);
-            totalTimer = null;
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+            log("tus", `Upload FAILED after ${elapsed}s: ${err.message}`, {
+              progressEvents: progressEventCount,
+            });
+            reject(err);
+          },
+          onProgress: (bytesUploaded, bytesTotal) => {
+            progressEventCount++;
+            const percent = Math.round((bytesUploaded / bytesTotal) * 100);
+            setUploadProgress(percent);
+            setProgress(`Uploading file… ${percent}%`);
+
+            if (progressEventCount <= 3 || progressEventCount % 10 === 0 || percent >= 100) {
+              const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+              log("tus", `Progress: ${percent}% (${(bytesUploaded / 1024 / 1024).toFixed(1)}MB / ${(bytesTotal / 1024 / 1024).toFixed(1)}MB) – event #${progressEventCount} – ${elapsed}s elapsed`);
+            }
+          },
+          onSuccess: () => {
+            clearTimeout(totalTimer);
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+            log("tus", `Upload completed in ${elapsed}s`, {
+              storagePath,
+              progressEvents: progressEventCount,
+            });
+            resolve(storagePath);
+          },
+        });
+
+        // Check for a previous incomplete upload to resume
+        tusUpload.findPreviousUploads().then((previousUploads) => {
+          if (previousUploads.length > 0) {
+            log("tus", "Found previous incomplete upload, resuming…");
+            tusUpload.resumeFromPreviousUpload(previousUploads[0]);
           }
-        }
-      };
-
-      let blob;
-      try {
-        blob = await uploadWithWatchdog(true);
-      } catch (firstErr) {
-        const message = firstErr instanceof Error ? firstErr.message : String(firstErr);
-        const looksStalled = message.toLowerCase().includes("aborted") || message.toLowerCase().includes("abort");
-        log("retry", `First attempt error: "${message}", looksStalled: ${looksStalled}`);
-        if (!looksStalled) {
-          throw firstErr;
-        }
-
-        setUploadProgress(0);
-        setProgress("Upload stalled. Retrying in compatibility mode…");
-        log("retry", "Falling back to single-PUT upload mode");
-        blob = await uploadWithWatchdog(false);
-      }
+          tusUpload.start();
+        });
+      });
 
       setProgress("File uploaded! Starting processing…");
       setUploadProgress(100);
       setIsUploading(false);
 
-      // 2. Start processing with a small JSON payload only (no CSV body)
-      log("process", `Calling /api/generate-report with blobUrl: ${blob.url}`);
+      // 3. Start processing with the storage path (no CSV body sent)
+      log("process", `Calling /api/generate-report with storagePath: ${storagPathForTus}`);
       const response = await fetch("/api/generate-report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          blobUrl: blob.url,
+          storagePath: storagPathForTus,
           options: { inUsFilter },
         }),
       });
