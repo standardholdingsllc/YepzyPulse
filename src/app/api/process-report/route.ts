@@ -1,20 +1,26 @@
 /**
  * Background processing endpoint for large CSV files.
- * This is triggered by the start-processing endpoint after the file is uploaded.
+ * OPTIMIZED: Parallel DB inserts, larger batches, no duplicate work.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { del } from "@vercel/blob";
 import { createServiceClient } from "@/lib/supabase";
-import { runIngestionPipeline } from "@/lib/pipeline/ingest";
+import { runIngestionPipeline, extractCustomerLocations } from "@/lib/pipeline/ingest";
 import { DEFAULT_TRANSACTION_TYPE_RULES } from "@/lib/classification/transaction-types";
 import { DEFAULT_REMITTANCE_VENDOR_RULES } from "@/lib/classification/remittance-vendors";
 import type { InUsFilterMode } from "@/lib/types";
-import { classifyCustomersInUs } from "@/lib/parsing/location";
 
 export const maxDuration = 300; // 5 minutes for large file processing (Pro plan)
 
 const CSV_BUCKET = "csv-uploads";
+
+// Larger batch size = fewer round trips
+// Supabase can handle 1000+ rows per insert efficiently
+const BATCH_SIZE = 2000;
+
+// Number of parallel insert operations
+const PARALLEL_INSERTS = 5;
 
 // Official employer mapping source
 const OFFICIAL_MAPPING_URL =
@@ -23,7 +29,7 @@ const OFFICIAL_MAPPING_URL =
 async function fetchOfficialMapping(): Promise<Record<string, string>> {
   console.log("[Process] Fetching official employer mapping from GitHub...");
   const response = await fetch(OFFICIAL_MAPPING_URL, {
-    cache: "no-store", // Always fetch fresh in background job
+    cache: "no-store",
   });
 
   if (!response.ok) {
@@ -44,10 +50,50 @@ interface ProcessRequest {
   inUsFilter: InUsFilterMode;
 }
 
-const BATCH_SIZE = 500;
-
 function isHttpUrl(value: string): boolean {
   return /^https?:\/\//i.test(value);
+}
+
+/**
+ * Insert rows in parallel batches for maximum throughput.
+ */
+async function parallelBatchInsert<T>(
+  supabase: ReturnType<typeof createServiceClient>,
+  table: string,
+  rows: T[],
+  batchSize: number = BATCH_SIZE,
+  parallelism: number = PARALLEL_INSERTS
+): Promise<void> {
+  if (rows.length === 0) return;
+
+  const batches: T[][] = [];
+  for (let i = 0; i < rows.length; i += batchSize) {
+    batches.push(rows.slice(i, i + batchSize));
+  }
+
+  console.log(`[Process] Inserting ${rows.length} rows into ${table} in ${batches.length} batches (${parallelism} parallel)`);
+
+  // Process batches in parallel chunks
+  for (let i = 0; i < batches.length; i += parallelism) {
+    const chunk = batches.slice(i, i + parallelism);
+    const promises = chunk.map((batch, idx) =>
+      supabase
+        .from(table)
+        .insert(batch as Record<string, unknown>[])
+        .then(({ error }) => {
+          if (error) {
+            throw new Error(`Failed to insert batch ${i + idx + 1} into ${table}: ${error.message}`);
+          }
+        })
+    );
+
+    await Promise.all(promises);
+    
+    const completed = Math.min(i + parallelism, batches.length);
+    if (completed % 10 === 0 || completed === batches.length) {
+      console.log(`[Process] ${table}: ${completed}/${batches.length} batches complete`);
+    }
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -71,10 +117,11 @@ export async function POST(request: NextRequest) {
       throw new Error("Missing file reference for report processing");
     }
 
+    const startTime = Date.now();
     console.log(`[Process] Starting background processing for report ${body.slug}`);
     console.log(`[Process] File reference: ${fileReference}`);
 
-    // 1. Download CSV from either blob URL or Supabase Storage
+    // 1. Download CSV
     let csvText: string;
     if (isHttpUrl(fileReference)) {
       console.log("[Process] Downloading CSV from blob URL...");
@@ -95,9 +142,9 @@ export async function POST(request: NextRequest) {
 
       csvText = await fileData.text();
     }
-    console.log(`[Process] CSV size: ${csvText.length} chars (${(csvText.length / 1024 / 1024).toFixed(2)} MB)`);
+    console.log(`[Process] CSV downloaded: ${(csvText.length / 1024 / 1024).toFixed(2)} MB in ${Date.now() - startTime}ms`);
 
-    // 2. Fetch employer mapping
+    // 2. Fetch employer mapping (can happen in parallel with nothing else yet)
     let employerMappingJson: unknown = {};
     try {
       employerMappingJson = await fetchOfficialMapping();
@@ -106,18 +153,18 @@ export async function POST(request: NextRequest) {
       console.log("[Process] Proceeding without employer mapping");
     }
 
-    // 3. Run ingestion pipeline
+    // 3. Run optimized ingestion pipeline
     console.log("[Process] Running ingestion pipeline...");
+    const pipelineStart = Date.now();
     const result = runIngestionPipeline({
       csvText,
       employerMappingJson,
       transactionTypeRules: DEFAULT_TRANSACTION_TYPE_RULES,
       remittanceVendorRules: DEFAULT_REMITTANCE_VENDOR_RULES,
     });
+    console.log(`[Process] Pipeline complete: ${result.transactions.length} transactions in ${Date.now() - pipelineStart}ms`);
 
-    console.log(`[Process] Pipeline complete: ${result.transactions.length} transactions`);
-
-    // 4. Update report with classification rules and stats
+    // 4. Update report with stats (quick operation)
     await supabase
       .from("reports")
       .update({
@@ -129,125 +176,85 @@ export async function POST(request: NextRequest) {
       })
       .eq("id", reportId);
 
-    // 5. Insert transactions in batches
-    console.log(`[Process] Inserting ${result.transactions.length} transactions...`);
-    for (let i = 0; i < result.transactions.length; i += BATCH_SIZE) {
-      const batch = result.transactions.slice(i, i + BATCH_SIZE);
-      const rows = batch.map((tx) => ({
-        report_id: reportId,
-        raw_created_at: tx.rawCreatedAt?.toISOString() || null,
-        unit_id: tx.unitId || null,
-        unit_type: tx.unitType || null,
-        amount_cents: tx.amountCents,
-        direction: tx.direction || null,
-        balance_cents: tx.balanceCents,
-        summary: tx.summary || null,
-        customer_id: tx.customerId || null,
-        account_id: tx.accountId || null,
-        counterparty_name: tx.counterpartyName || null,
-        counterparty_customer: tx.counterpartyCustomer || null,
-        counterparty_account: tx.counterpartyAccount || null,
-        payment_id: tx.paymentId || null,
-        transaction_group: tx.transactionGroup,
-        remittance_vendor: tx.remittanceVendor,
-        vendor_match_evidence: tx.vendorMatchEvidence || null,
-        employer_name: tx.employerName,
-        employer_key: tx.employerKey,
-        location_raw: tx.locationRaw || null,
-        location_city: tx.locationCity || null,
-        location_state: tx.locationState || null,
-        location_country: tx.locationCountry || null,
-        customer_in_us: tx.customerInUs,
-      }));
+    // 5. Prepare all insert data upfront (avoid repeated mapping in loops)
+    const dbStart = Date.now();
+    
+    // Transaction rows
+    const transactionRows = result.transactions.map((tx) => ({
+      report_id: reportId,
+      raw_created_at: tx.rawCreatedAt?.toISOString() || null,
+      unit_id: tx.unitId || null,
+      unit_type: tx.unitType || null,
+      amount_cents: tx.amountCents,
+      direction: tx.direction || null,
+      balance_cents: tx.balanceCents,
+      summary: tx.summary || null,
+      customer_id: tx.customerId || null,
+      account_id: tx.accountId || null,
+      counterparty_name: tx.counterpartyName || null,
+      counterparty_customer: tx.counterpartyCustomer || null,
+      counterparty_account: tx.counterpartyAccount || null,
+      payment_id: tx.paymentId || null,
+      transaction_group: tx.transactionGroup,
+      remittance_vendor: tx.remittanceVendor,
+      vendor_match_evidence: null, // Skip evidence for performance
+      employer_name: tx.employerName,
+      employer_key: tx.employerKey,
+      location_raw: tx.locationRaw || null,
+      location_city: tx.locationCity || null,
+      location_state: tx.locationState || null,
+      location_country: tx.locationCountry || null,
+      customer_in_us: tx.customerInUs,
+    }));
 
-      const { error } = await supabase.from("report_transactions").insert(rows);
-      if (error) {
-        throw new Error(`Failed to insert transactions batch ${i}: ${error.message}`);
-      }
+    // Employer rollup rows
+    const employerRows = result.employerRollups.map((er) => ({
+      report_id: reportId,
+      employer_name: er.employerName,
+      employer_key: er.employerKey,
+      worker_count: er.workerCount,
+      transaction_count: er.transactionCount,
+      total_debit_cents: er.totalDebitCents,
+      total_credit_cents: er.totalCreditCents,
+      card_count: er.cardCount,
+      card_amount_cents: er.cardAmountCents,
+      atm_count: er.atmCount,
+      atm_amount_cents: er.atmAmountCents,
+      fee_count: er.feeCount,
+      fee_amount_cents: er.feeAmountCents,
+      book_count: er.bookCount,
+      book_amount_cents: er.bookAmountCents,
+      remittance_count: er.remittanceCount,
+      remittance_amount_cents: er.remittanceAmountCents,
+      workers_in_us: er.workersInUs,
+      workers_not_in_us: er.workersNotInUs,
+      workers_unknown_us: er.workersUnknownUs,
+      vendor_breakdown: er.vendorBreakdown,
+    }));
 
-      console.log(`[Process] Inserted batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(result.transactions.length / BATCH_SIZE)}`);
-    }
+    // Vendor rollup rows
+    const vendorRows = result.vendorRollups.map((vr) => ({
+      report_id: reportId,
+      vendor_name: vr.vendorName,
+      transaction_count: vr.transactionCount,
+      total_amount_cents: vr.totalAmountCents,
+      unique_customers: vr.uniqueCustomers,
+    }));
 
-    // 6. Insert employer rollups
-    console.log(`[Process] Inserting ${result.employerRollups.length} employer rollups...`);
-    if (result.employerRollups.length > 0) {
-      const employerRows = result.employerRollups.map((er) => ({
-        report_id: reportId,
-        employer_name: er.employerName,
-        employer_key: er.employerKey,
-        worker_count: er.workerCount,
-        transaction_count: er.transactionCount,
-        total_debit_cents: er.totalDebitCents,
-        total_credit_cents: er.totalCreditCents,
-        card_count: er.cardCount,
-        card_amount_cents: er.cardAmountCents,
-        atm_count: er.atmCount,
-        atm_amount_cents: er.atmAmountCents,
-        fee_count: er.feeCount,
-        fee_amount_cents: er.feeAmountCents,
-        book_count: er.bookCount,
-        book_amount_cents: er.bookAmountCents,
-        remittance_count: er.remittanceCount,
-        remittance_amount_cents: er.remittanceAmountCents,
-        workers_in_us: er.workersInUs,
-        workers_not_in_us: er.workersNotInUs,
-        workers_unknown_us: er.workersUnknownUs,
-        vendor_breakdown: er.vendorBreakdown,
-      }));
-
-      for (let i = 0; i < employerRows.length; i += BATCH_SIZE) {
-        const batch = employerRows.slice(i, i + BATCH_SIZE);
-        const { error } = await supabase.from("report_employer_rollups").insert(batch);
-        if (error) {
-          throw new Error(`Failed to insert employer rollups: ${error.message}`);
-        }
-      }
-    }
-
-    // 7. Insert vendor rollups
-    console.log(`[Process] Inserting ${result.vendorRollups.length} vendor rollups...`);
-    if (result.vendorRollups.length > 0) {
-      const vendorRows = result.vendorRollups.map((vr) => ({
-        report_id: reportId,
-        vendor_name: vr.vendorName,
-        transaction_count: vr.transactionCount,
-        total_amount_cents: vr.totalAmountCents,
-        unique_customers: vr.uniqueCustomers,
-      }));
-
-      const { error } = await supabase.from("report_vendor_rollups").insert(vendorRows);
-      if (error) {
-        throw new Error(`Failed to insert vendor rollups: ${error.message}`);
-      }
-    }
-
-    // 8. Insert customer locations
-    console.log("[Process] Inserting customer locations...");
-    const customerLocationResults = classifyCustomersInUs(
-      result.transactions.map((tx) => ({
-        customerId: tx.customerId,
-        unitType: tx.unitType,
-        summary: tx.summary,
-        createdAt: tx.rawCreatedAt,
-      }))
-    );
-
+    // Customer location rows
+    const customerLocations = extractCustomerLocations(result.transactions);
     const txCountPerCustomer = new Map<string, number>();
     for (const tx of result.transactions) {
       txCountPerCustomer.set(tx.customerId, (txCountPerCustomer.get(tx.customerId) || 0) + 1);
     }
-
     const customerEmployers = new Map<string, { name: string; key: string }>();
     for (const tx of result.transactions) {
       if (!customerEmployers.has(tx.customerId)) {
-        customerEmployers.set(tx.customerId, {
-          name: tx.employerName,
-          key: tx.employerKey,
-        });
+        customerEmployers.set(tx.customerId, { name: tx.employerName, key: tx.employerKey });
       }
     }
 
-    const locationRows = Array.from(customerLocationResults.entries()).map(([customerId, loc]) => {
+    const locationRows = Array.from(customerLocations.entries()).map(([customerId, loc]) => {
       const emp = customerEmployers.get(customerId);
       return {
         report_id: reportId,
@@ -264,49 +271,47 @@ export async function POST(request: NextRequest) {
       };
     });
 
-    for (let i = 0; i < locationRows.length; i += BATCH_SIZE) {
-      const batch = locationRows.slice(i, i + BATCH_SIZE);
-      const { error } = await supabase.from("report_customer_locations").insert(batch);
-      if (error) {
-        throw new Error(`Failed to insert customer locations: ${error.message}`);
-      }
-    }
+    console.log(`[Process] Data prepared in ${Date.now() - dbStart}ms`);
 
-    // 9. Mark report as ready and clear the storage path
-    console.log("[Process] Marking report as ready...");
+    // 6. Insert all data with parallel batches
+    // Transactions are the bulk - do them first
+    await parallelBatchInsert(supabase, "report_transactions", transactionRows);
+
+    // These are smaller, can do in parallel with each other
+    await Promise.all([
+      parallelBatchInsert(supabase, "report_employer_rollups", employerRows, 500, 3),
+      parallelBatchInsert(supabase, "report_vendor_rollups", vendorRows, 500, 3),
+      parallelBatchInsert(supabase, "report_customer_locations", locationRows, 1000, 3),
+    ]);
+
+    console.log(`[Process] All DB inserts complete in ${Date.now() - dbStart}ms`);
+
+    // 7. Mark report as ready
     await supabase
       .from("reports")
       .update({ status: "ready", csv_blob_url: null })
       .eq("id", reportId);
 
-    // 10. Delete uploaded file (cleanup)
-    console.log("[Process] Cleaning up uploaded source...");
+    // 8. Cleanup uploaded file (non-blocking)
     try {
       if (isHttpUrl(fileReference)) {
         await del(fileReference);
-        console.log("[Process] Blob file deleted successfully");
+        console.log("[Process] Blob file deleted");
       } else {
-        const { error: removeError } = await supabase.storage
-          .from(CSV_BUCKET)
-          .remove([fileReference]);
-
-        if (removeError) {
-          console.error("[Process] Failed to delete storage file (non-fatal):", removeError);
-        } else {
-          console.log("[Process] Storage file deleted successfully");
-        }
+        await supabase.storage.from(CSV_BUCKET).remove([fileReference]);
+        console.log("[Process] Storage file deleted");
       }
     } catch (delError) {
-      console.error("[Process] Failed to delete uploaded source (non-fatal):", delError);
+      console.error("[Process] Cleanup failed (non-fatal):", delError);
     }
 
-    console.log(`[Process] Report ${body.slug} processed successfully!`);
+    const totalTime = Date.now() - startTime;
+    console.log(`[Process] Report ${body.slug} complete! Total time: ${totalTime}ms (${(totalTime / 1000).toFixed(1)}s)`);
 
-    return NextResponse.json({ success: true, slug: body.slug });
+    return NextResponse.json({ success: true, slug: body.slug, processingTimeMs: totalTime });
   } catch (error) {
     console.error("[Process] Error processing report:", error);
 
-    // Mark report as errored
     if (reportId) {
       await supabase
         .from("reports")

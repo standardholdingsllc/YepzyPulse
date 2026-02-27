@@ -168,3 +168,45 @@ export function classifyRemittanceVendor(
 ): string {
   return classifyRemittanceVendorWithEvidence(summary, counterpartyName, rules).vendor;
 }
+
+/**
+ * Fast classification without creating evidence objects.
+ * Used in hot path for large file processing.
+ */
+export function classifyRemittanceVendorFast(
+  summary: string | null | undefined,
+  counterpartyName: string | null | undefined,
+  rules: RemittanceVendorRule[] = DEFAULT_REMITTANCE_VENDOR_RULES
+): string {
+  const summaryLower = (summary || "").toLowerCase();
+  const counterpartyLower = (counterpartyName || "").toLowerCase();
+  
+  if (!summaryLower && !counterpartyLower) {
+    return "Not remittance";
+  }
+
+  for (const rule of rules) {
+    // Check exclusions first
+    let hasExclusion = false;
+    if (rule.exclusions) {
+      for (const ex of rule.exclusions) {
+        const exLower = ex.toLowerCase();
+        if (summaryLower.includes(exLower) || counterpartyLower.includes(exLower)) {
+          hasExclusion = true;
+          break;
+        }
+      }
+    }
+    if (hasExclusion) continue;
+
+    // Check keywords
+    for (const keyword of rule.keywords) {
+      const kwLower = keyword.toLowerCase();
+      if (summaryLower.includes(kwLower) || counterpartyLower.includes(kwLower)) {
+        return rule.vendor;
+      }
+    }
+  }
+
+  return "Not remittance";
+}

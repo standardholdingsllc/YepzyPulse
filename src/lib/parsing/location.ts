@@ -14,6 +14,10 @@ export interface ParsedLocation {
   country: string | null;
 }
 
+// Pre-compiled regex for better performance
+const ADDRESS_REGEX = /Address:\s*([^|]*)/i;
+const COUNTRY_CODE_REGEX = /^[A-Z]{2}$/;
+
 /**
  * Extract location from a summary string.
  * Returns null if no address pattern is found.
@@ -23,13 +27,7 @@ export function extractLocation(
 ): ParsedLocation | null {
   if (!summary) return null;
 
-  // Pattern: Address: CITY, STATE, COUNTRY
-  // The city may be truncated. State is typically 2 chars. Country is typically 2 chars.
-  // We also handle cases where parts might be missing.
-  const addressMatch = summary.match(
-    /Address:\s*([^|]*)/i
-  );
-
+  const addressMatch = summary.match(ADDRESS_REGEX);
   if (!addressMatch) return null;
 
   const rawAddress = addressMatch[1].trim();
@@ -47,9 +45,7 @@ export function extractLocation(
     state = parts[1] || null;
     country = parts[2] || null;
   } else if (parts.length === 2) {
-    // Could be STATE, COUNTRY or CITY, STATE
-    // If second part is 2 chars and looks like a country code, treat as state, country
-    if (parts[1].length === 2 && /^[A-Z]{2}$/.test(parts[1])) {
+    if (parts[1].length === 2 && COUNTRY_CODE_REGEX.test(parts[1])) {
       state = parts[0];
       country = parts[1];
     } else {
@@ -57,24 +53,81 @@ export function extractLocation(
       state = parts[1];
     }
   } else if (parts.length === 1) {
-    // Could be just a country code
-    if (parts[0].length === 2 && /^[A-Z]{2}$/.test(parts[0])) {
+    if (parts[0].length === 2 && COUNTRY_CODE_REGEX.test(parts[0])) {
       country = parts[0];
     } else {
       city = parts[0];
     }
   }
 
-  // Normalize country to uppercase
   if (country) country = country.toUpperCase().trim();
   if (state) state = state.toUpperCase().trim();
 
-  return {
-    raw: rawAddress,
-    city,
-    state,
-    country,
-  };
+  return { raw: rawAddress, city, state, country };
+}
+
+/**
+ * Fast location extraction - optimized for hot path.
+ * Uses indexOf instead of regex where possible.
+ */
+export function extractLocationFast(summary: string): ParsedLocation | null {
+  // Fast check: does it contain "Address:" at all?
+  const addrIdx = summary.indexOf("Address:");
+  if (addrIdx === -1) {
+    // Try lowercase
+    const addrIdxLower = summary.toLowerCase().indexOf("address:");
+    if (addrIdxLower === -1) return null;
+  }
+  
+  // Fall back to regex for actual parsing (still needed for capture)
+  const addressMatch = summary.match(ADDRESS_REGEX);
+  if (!addressMatch) return null;
+
+  const rawAddress = addressMatch[1].trim();
+  if (!rawAddress) return null;
+
+  // Fast path: check for common US pattern "CITY, ST, US"
+  const pipeIdx = rawAddress.indexOf("|");
+  const cleanAddr = pipeIdx > 0 ? rawAddress.substring(0, pipeIdx).trim() : rawAddress;
+  
+  // Split by comma
+  const parts: string[] = [];
+  let start = 0;
+  for (let i = 0; i <= cleanAddr.length; i++) {
+    if (i === cleanAddr.length || cleanAddr[i] === ",") {
+      const part = cleanAddr.substring(start, i).trim();
+      if (part) parts.push(part);
+      start = i + 1;
+    }
+  }
+
+  let city: string | null = null;
+  let state: string | null = null;
+  let country: string | null = null;
+
+  if (parts.length >= 3) {
+    city = parts[0];
+    state = parts[1].toUpperCase();
+    country = parts[2].toUpperCase();
+  } else if (parts.length === 2) {
+    const p1Upper = parts[1].toUpperCase();
+    if (parts[1].length === 2 && /^[A-Z]{2}$/.test(p1Upper)) {
+      state = parts[0].toUpperCase();
+      country = p1Upper;
+    } else {
+      city = parts[0];
+      state = p1Upper;
+    }
+  } else if (parts.length === 1) {
+    const p0Upper = parts[0].toUpperCase();
+    if (parts[0].length === 2 && /^[A-Z]{2}$/.test(p0Upper)) {
+      country = p0Upper;
+    } else {
+      city = parts[0];
+    }
+  }
+
+  return { raw: rawAddress, city, state, country };
 }
 
 /**
