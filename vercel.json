@@ -8,5 +8,11 @@
     "src/app/api/process-report/route.ts": {
       "maxDuration": 300
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cleanup-stale",
+      "schedule": "*/5 * * * *"
+    }
+  ]
 }

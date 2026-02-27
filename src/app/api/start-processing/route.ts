@@ -4,9 +4,13 @@
  * Supports either:
  * - blobUrl (public Vercel Blob URL)
  * - storagePath (Supabase Storage path)
+ *
+ * Uses waitUntil() to ensure the background job trigger is reliable and not
+ * terminated when the response is sent.
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { after } from "next/server";
 import { createServiceClient } from "@/lib/supabase";
 import { generateSlug } from "@/lib/utils";
 import type { InUsFilterMode } from "@/lib/types";
@@ -45,7 +49,7 @@ export async function POST(request: NextRequest) {
 
     console.log(`[StartProcessing] Creating report ${slug} for file reference: ${normalizedReference}`);
 
-    // Create report record in "processing" state
+    // Create report record in "processing" state with processing_started_at timestamp
     const supabase = createServiceClient();
     const { data: report, error: reportError } = await supabase
       .from("reports")
@@ -57,6 +61,7 @@ export async function POST(request: NextRequest) {
         classification_rules: {},
         stats: {},
         csv_blob_url: normalizedReference,
+        processing_started_at: new Date().toISOString(),
       })
       .select("id")
       .single();
@@ -71,23 +76,43 @@ export async function POST(request: NextRequest) {
 
     console.log(`[StartProcessing] Created report ${slug} (id: ${report.id}), triggering background processing...`);
 
-    // Trigger background processing
+    // Trigger background processing using after() for reliable execution
+    // This ensures the fetch completes even after response is sent
     const processUrl = new URL("/api/process-report", request.url);
-    
-    // Fire and forget - don't await
-    fetch(processUrl.toString(), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        reportId: report.id,
-        slug,
-        blobUrl: isHttpUrl(normalizedReference) ? normalizedReference : undefined,
-        storagePath: isHttpUrl(normalizedReference) ? undefined : normalizedReference,
-        fileReference: normalizedReference,
-        inUsFilter,
-      }),
-    }).catch((err) => {
-      console.error("[StartProcessing] Failed to trigger processing:", err);
+    const processPayload = JSON.stringify({
+      reportId: report.id,
+      slug,
+      blobUrl: isHttpUrl(normalizedReference) ? normalizedReference : undefined,
+      storagePath: isHttpUrl(normalizedReference) ? undefined : normalizedReference,
+      fileReference: normalizedReference,
+      inUsFilter,
+    });
+
+    after(async () => {
+      try {
+        console.log(`[StartProcessing] after() triggering process-report for ${slug}`);
+        const response = await fetch(processUrl.toString(), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: processPayload,
+        });
+        if (!response.ok) {
+          console.error(`[StartProcessing] process-report returned ${response.status} for ${slug}`);
+        } else {
+          console.log(`[StartProcessing] process-report triggered successfully for ${slug}`);
+        }
+      } catch (err) {
+        console.error("[StartProcessing] Failed to trigger processing in after():", err);
+        // Mark report as error since background job failed to start
+        const supabase = createServiceClient();
+        await supabase
+          .from("reports")
+          .update({
+            status: "error",
+            error_message: "Failed to start background processing job",
+          })
+          .eq("id", report.id);
+      }
     });
 
     return NextResponse.json({

@@ -28,6 +28,37 @@ export default async function ReportPage({ params }: PageProps) {
   }
 
   if (report.status === "processing") {
+    // Check if processing has been stuck for too long (> 6 minutes = 360 seconds)
+    // This catches jobs that timed out without updating status
+    const STALE_THRESHOLD_MS = 6 * 60 * 1000; // 6 minutes
+    const processingStarted = report.processingStartedAt
+      ? new Date(report.processingStartedAt).getTime()
+      : new Date(report.createdAt).getTime();
+    const elapsedMs = Date.now() - processingStarted;
+    const isStale = elapsedMs > STALE_THRESHOLD_MS;
+
+    if (isStale) {
+      return (
+        <div className="flex flex-col items-center justify-center py-20">
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-8 text-center max-w-md">
+            <svg className="mx-auto mb-4 h-12 w-12 text-red-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <h2 className="text-xl font-semibold text-red-400 mb-2">Processing Timed Out</h2>
+            <p className="text-sm text-red-300 mb-4">
+              Your file was too large to process within the time limit. This typically happens with files over 100MB.
+            </p>
+            <p className="text-xs text-muted mb-4">
+              Processing started {Math.round(elapsedMs / 60000)} minutes ago and appears to have stalled.
+            </p>
+            <Link href="/" className="inline-block rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover transition-colors">
+              ← Try with a smaller file
+            </Link>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="flex flex-col items-center justify-center py-20">
         <div className="rounded-xl border border-accent/30 bg-accent/5 p-8 text-center max-w-md">

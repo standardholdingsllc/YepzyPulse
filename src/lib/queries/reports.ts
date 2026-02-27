@@ -33,6 +33,7 @@ export async function getReportBySlug(
     errorMessage: data.error_message,
     inUsFilter: data.in_us_filter,
     stats: data.stats,
+    processingStartedAt: data.processing_started_at,
   };
 }
 

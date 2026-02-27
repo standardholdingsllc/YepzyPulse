@@ -90,6 +90,7 @@ export interface ReportOverview {
   errorMessage: string | null;
   inUsFilter: string;
   stats: ReportStats;
+  processingStartedAt: string | null;
 }
 
 export interface CustomerLocation {
