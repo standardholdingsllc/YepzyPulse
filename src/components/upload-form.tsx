@@ -58,7 +58,7 @@ export function UploadForm() {
    * Uses XMLHttpRequest for upload progress tracking.
    */
   const uploadToStorage = (
-    signedUrl: string,
+    uploadUrl: string,
     file: File,
     contentType: string,
     onProgress: (percent: number) => void,
@@ -109,7 +109,7 @@ export function UploadForm() {
       };
 
       xhr.timeout = UPLOAD_TOTAL_TIMEOUT_MS;
-      xhr.open("PUT", signedUrl, true);
+      xhr.open("PUT", uploadUrl, true);
       xhr.setRequestHeader("Content-Type", contentType);
       xhr.send(file);
     });
@@ -160,8 +160,14 @@ export function UploadForm() {
           throw new Error(errData.error || `Failed to get upload URL (${urlResponse.status})`);
         }
 
-        const { signedUrl, path: storagePath } = await urlResponse.json();
-        log("storage", `Got signed URL for path: ${storagePath}`);
+        const { uploadUrl, signedUrl, path: storagePath } = await urlResponse.json();
+        const resolvedUploadUrl: string | undefined = uploadUrl || signedUrl;
+
+        if (!resolvedUploadUrl) {
+          throw new Error("Upload URL missing from server response");
+        }
+
+        log("storage", `Got upload URL for path: ${storagePath}`);
 
         // 2. Upload file directly to Supabase Storage via the signed URL
         const controller = new AbortController();
@@ -174,7 +180,7 @@ export function UploadForm() {
 
         try {
           await uploadToStorage(
-            signedUrl,
+            resolvedUploadUrl,
             csvFile,
             csvFile.type || "text/csv",
             (percent) => {

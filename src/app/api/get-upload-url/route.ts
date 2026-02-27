@@ -11,6 +11,28 @@ import { createServiceClient } from "@/lib/supabase";
 
 const CSV_BUCKET = "csv-uploads";
 
+function toAbsoluteUploadUrl(signedUrl: string): string {
+  if (/^https?:\/\//i.test(signedUrl)) {
+    return signedUrl;
+  }
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!supabaseUrl) {
+    throw new Error("NEXT_PUBLIC_SUPABASE_URL is not configured");
+  }
+
+  const baseUrl = supabaseUrl.replace(/\/+$/, "");
+  const normalizedPath = signedUrl.startsWith("/") ? signedUrl : `/${signedUrl}`;
+
+  // createSignedUploadUrl may return either:
+  // - /storage/v1/object/upload/sign/...
+  // - /object/upload/sign/...
+  if (normalizedPath.startsWith("/storage/v1/")) {
+    return `${baseUrl}${normalizedPath}`;
+  }
+  return `${baseUrl}/storage/v1${normalizedPath}`;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { filename } = await request.json();
@@ -43,8 +65,10 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(`[GetUploadUrl] Signed URL created for path: ${data.path}`);
+    const uploadUrl = toAbsoluteUploadUrl(data.signedUrl);
 
     return NextResponse.json({
+      uploadUrl,
       signedUrl: data.signedUrl,
       path: data.path,
       token: data.token,
