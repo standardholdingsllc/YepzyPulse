@@ -8,7 +8,7 @@ import type { InUsFilterMode } from "@/lib/types";
 
 export const maxDuration = 60; // Vercel function timeout (Pro plan)
 
-// Official employer mapping source
+// Official employer mapping source (always used)
 const OFFICIAL_MAPPING_URL =
   "https://raw.githubusercontent.com/standardholdingsllc/hubspot-address-mapper/refs/heads/main/web-app/data/customer_company.json";
 
@@ -32,11 +32,7 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
 
     const csvFile = formData.get("csv") as File | null;
-    const mappingFile = formData.get("mapping") as File | null;
-    const mappingUrl = formData.get("mappingUrl") as string | null;
     const inUsFilter = (formData.get("inUsFilter") as InUsFilterMode) || "strict";
-    const customTypeRules = formData.get("transactionTypeRules") as string | null;
-    const customVendorRules = formData.get("remittanceVendorRules") as string | null;
 
     if (!csvFile) {
       return NextResponse.json(
@@ -48,52 +44,16 @@ export async function POST(request: NextRequest) {
     // Read CSV
     console.log("[API] Reading CSV file...");
     const csvText = await csvFile.text();
-    console.log(`[API] CSV size: ${csvText.length} chars`);
+    console.log(`[API] CSV size: ${csvText.length} chars (${(csvText.length / 1024 / 1024).toFixed(2)} MB)`);
 
-    // Get employer mapping (priority: custom file > URL > empty)
+    // Always fetch official employer mapping
     let employerMappingJson: unknown = {};
-    
-    if (mappingFile) {
-      // Custom file upload takes priority
-      console.log("[API] Reading custom mapping file...");
-      const mappingText = await mappingFile.text();
-      try {
-        employerMappingJson = JSON.parse(mappingText);
-        console.log(`[API] Loaded ${Object.keys(employerMappingJson as object).length} mappings from custom file`);
-      } catch {
-        return NextResponse.json(
-          { error: "Invalid JSON in mapping file" },
-          { status: 400 }
-        );
-      }
-    } else if (mappingUrl === OFFICIAL_MAPPING_URL) {
-      // Fetch from official GitHub source
-      try {
-        employerMappingJson = await fetchOfficialMapping();
-      } catch (err) {
-        console.error("[API] Failed to fetch official mapping:", err);
-        // Continue without mapping rather than failing
-        console.log("[API] Proceeding without employer mapping");
-      }
-    }
-
-    // Parse custom rules if provided
-    let transactionTypeRules = DEFAULT_TRANSACTION_TYPE_RULES;
-    if (customTypeRules) {
-      try {
-        transactionTypeRules = JSON.parse(customTypeRules);
-      } catch {
-        // Fall back to defaults
-      }
-    }
-
-    let remittanceVendorRules = DEFAULT_REMITTANCE_VENDOR_RULES;
-    if (customVendorRules) {
-      try {
-        remittanceVendorRules = JSON.parse(customVendorRules);
-      } catch {
-        // Fall back to defaults
-      }
+    try {
+      employerMappingJson = await fetchOfficialMapping();
+    } catch (err) {
+      console.error("[API] Failed to fetch official mapping:", err);
+      // Continue without mapping rather than failing
+      console.log("[API] Proceeding without employer mapping");
     }
 
     // Run pipeline
@@ -101,8 +61,8 @@ export async function POST(request: NextRequest) {
     const result = runIngestionPipeline({
       csvText,
       employerMappingJson,
-      transactionTypeRules,
-      remittanceVendorRules,
+      transactionTypeRules: DEFAULT_TRANSACTION_TYPE_RULES,
+      remittanceVendorRules: DEFAULT_REMITTANCE_VENDOR_RULES,
     });
 
     // Generate slug and store
@@ -113,8 +73,8 @@ export async function POST(request: NextRequest) {
       slug,
       inUsFilter,
       classificationRules: {
-        transactionTypeRules,
-        remittanceVendorRules,
+        transactionTypeRules: DEFAULT_TRANSACTION_TYPE_RULES,
+        remittanceVendorRules: DEFAULT_REMITTANCE_VENDOR_RULES,
       },
       transactions: result.transactions,
       employerRollups: result.employerRollups,

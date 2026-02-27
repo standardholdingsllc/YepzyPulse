@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Yepzy Transaction Processor",
+  title: "YepzyPulse",
   description: "Upload Unit transaction CSVs, enrich, and generate shareable reports",
 };
 
@@ -21,7 +21,7 @@ export default function RootLayout({
                 Y
               </div>
               <h1 className="text-xl font-semibold text-white">
-                Yepzy Transaction Processor
+                YepzyPulse
               </h1>
             </div>
           </div>

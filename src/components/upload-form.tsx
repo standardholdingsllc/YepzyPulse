@@ -5,23 +5,16 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { useRouter } from "next/navigation";
 
 type InUsFilter = "strict" | "lenient" | "all";
-type MappingSource = "official" | "custom";
-
-const OFFICIAL_MAPPING_URL =
-  "https://raw.githubusercontent.com/standardholdingsllc/hubspot-address-mapper/refs/heads/main/web-app/data/customer_company.json";
 
 export function UploadForm() {
   const router = useRouter();
   const [csvFile, setCsvFile] = useState<File | null>(null);
-  const [mappingSource, setMappingSource] = useState<MappingSource>("official");
-  const [mappingFile, setMappingFile] = useState<File | null>(null);
   const [inUsFilter, setInUsFilter] = useState<InUsFilter>("strict");
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const csvInputRef = useRef<HTMLInputElement>(null);
-  const mappingInputRef = useRef<HTMLInputElement>(null);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -51,18 +44,11 @@ export function UploadForm() {
 
     setIsProcessing(true);
     setError("");
-    setProgress("Uploading files...");
+    setProgress("Uploading file...");
 
     try {
       const formData = new FormData();
       formData.append("csv", csvFile);
-      
-      // Use official mapping URL or custom file
-      if (mappingSource === "official") {
-        formData.append("mappingUrl", OFFICIAL_MAPPING_URL);
-      } else if (mappingFile) {
-        formData.append("mapping", mappingFile);
-      }
       formData.append("inUsFilter", inUsFilter);
 
       setProgress("Processing transactions...");
@@ -95,7 +81,7 @@ export function UploadForm() {
         <CardHeader>
           <CardTitle>Transaction CSV</CardTitle>
           <CardDescription>
-            Upload a Unit transaction export CSV file (up to 25k+ rows supported)
+            Upload a Unit transaction export CSV file
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -130,7 +116,7 @@ export function UploadForm() {
                   <span className="font-medium text-accent">Drag & drop</span> a CSV here
                 </p>
                 <p className="mt-2 text-xs text-muted">or<span className="text-accent ml-1">Browse Files</span></p>
-                <p className="mt-3 text-xs text-muted/70">CSV files only • Max 50MB</p>
+                <p className="mt-3 text-xs text-muted/70">CSV files only • Max 200MB</p>
               </div>
             )}
             <input
@@ -140,109 +126,6 @@ export function UploadForm() {
               className="absolute inset-0 cursor-pointer opacity-0"
               onChange={(e) => setCsvFile(e.target.files?.[0] || null)}
             />
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Employer Mapping */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Employer Mapping</CardTitle>
-          <CardDescription>
-            Maps customer IDs to their employer. The official mapping is pulled from GitHub automatically.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            <label className={`flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition-all ${
-              mappingSource === "official" 
-                ? "border-accent/50 bg-accent/5" 
-                : "border-dark-border hover:border-dark-border-hover hover:bg-dark-bg-tertiary/30"
-            }`}>
-              <input
-                type="radio"
-                name="mappingSource"
-                value="official"
-                checked={mappingSource === "official"}
-                onChange={() => setMappingSource("official")}
-                className="mt-0.5 h-4 w-4 accent-accent"
-              />
-              <div className="flex-1">
-                <p className="text-sm font-medium text-white">Official Mapping (Recommended)</p>
-                <p className="text-xs text-muted mt-1">
-                  Fetches the latest customer→employer mapping from the{" "}
-                  <a
-                    href="https://github.com/standardholdingsllc/hubspot-address-mapper"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-accent hover:underline"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    hubspot-address-mapper
-                  </a>{" "}
-                  repository
-                </p>
-              </div>
-              <span className="inline-flex items-center rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-xs font-medium text-emerald-400">
-                Auto-updated
-              </span>
-            </label>
-            <label className={`flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition-all ${
-              mappingSource === "custom" 
-                ? "border-accent/50 bg-accent/5" 
-                : "border-dark-border hover:border-dark-border-hover hover:bg-dark-bg-tertiary/30"
-            }`}>
-              <input
-                type="radio"
-                name="mappingSource"
-                value="custom"
-                checked={mappingSource === "custom"}
-                onChange={() => setMappingSource("custom")}
-                className="mt-0.5 h-4 w-4 accent-accent"
-              />
-              <div>
-                <p className="text-sm font-medium text-white">Custom Mapping</p>
-                <p className="text-xs text-muted mt-1">Upload your own JSON file</p>
-              </div>
-            </label>
-
-            {/* Custom file upload (only shown when custom is selected) */}
-            {mappingSource === "custom" && (
-              <div
-                className={`relative flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 transition-all cursor-pointer mt-3 ${
-                  mappingFile
-                    ? "border-accent/50 bg-accent/5"
-                    : "border-dark-border hover:border-accent/50 hover:bg-dark-bg-tertiary/50"
-                }`}
-                onClick={() => mappingInputRef.current?.click()}
-              >
-                <svg className={`mb-2 h-6 w-6 ${mappingFile ? "text-accent" : "text-muted"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                {mappingFile ? (
-                  <div className="text-center">
-                    <p className="text-sm font-medium text-accent">{mappingFile.name}</p>
-                    <p className="mt-1 text-xs text-muted">
-                      {(mappingFile.size / 1024).toFixed(1)} KB
-                    </p>
-                  </div>
-                ) : (
-                  <div className="text-center">
-                    <p className="text-sm text-muted-light">
-                      <span className="font-medium text-accent">Click to upload</span> JSON file
-                    </p>
-                    <p className="mt-1 text-xs text-muted">{`{"customerId": "Employer Name", ...}`}</p>
-                  </div>
-                )}
-                <input
-                  ref={mappingInputRef}
-                  type="file"
-                  accept=".json"
-                  className="absolute inset-0 cursor-pointer opacity-0"
-                  onChange={(e) => setMappingFile(e.target.files?.[0] || null)}
-                />
-              </div>
-            )}
           </div>
         </CardContent>
       </Card>
@@ -318,7 +201,7 @@ export function UploadForm() {
       </button>
 
       <p className="text-center text-xs text-muted">
-        Files are processed in your browser and on the server. Nothing is stored permanently.
+        Files are processed securely. Reports expire after 7 days.
       </p>
     </form>
   );

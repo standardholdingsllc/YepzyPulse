@@ -1,5 +1,5 @@
 {
-  "name": "yepzy-transaction-processor",
+  "name": "yepzy-pulse",
   "version": "1.0.0",
   "private": true,
   "scripts": {

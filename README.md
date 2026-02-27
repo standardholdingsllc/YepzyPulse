@@ -1,11 +1,11 @@
-# Yepzy Transaction Processor
+# YepzyPulse
 
 A Vercel-hosted web tool that ingests raw debit transaction exports from Unit (CSV), enriches them with employer mapping and remittance vendor classification, and publishes shareable, interactive report links.
 
 ## Features
 
-- **CSV Ingestion**: Upload Unit transaction export CSVs (up to 25k+ rows)
-- **Employer Mapping**: Automatically fetches the official customer→employer mapping from [hubspot-address-mapper](https://github.com/standardholdingsllc/hubspot-address-mapper), or use a custom JSON file
+- **CSV Ingestion**: Upload Unit transaction export CSVs (up to 200MB, months of transaction data)
+- **Employer Mapping**: Automatically fetches the official customer→employer mapping from [hubspot-address-mapper](https://github.com/standardholdingsllc/hubspot-address-mapper)
 - **US Location Detection**: Parse merchant/ATM addresses to identify customers currently in the US
   - Explicit counts shown in UI: "Included: X US / Excluded: Y non-US / Unknown: Z"
   - Warning when strict mode excludes many unknown customers
@@ -144,50 +144,13 @@ src/
 
 ## Employer Mapping
 
-### Official Source (Default)
-
-By default, the tool fetches the employer mapping from the official GitHub repository:
+The tool automatically fetches the employer mapping from the official GitHub repository:
 
 ```
 https://raw.githubusercontent.com/standardholdingsllc/hubspot-address-mapper/main/web-app/data/customer_company.json
 ```
 
 This mapping is maintained by Standard Holdings and contains the authoritative customer ID → employer name associations. The mapping is fetched fresh on each report generation to ensure you always have the latest data.
-
-### Custom Mapping (Optional)
-
-If you need to use a different mapping, you can upload a custom JSON file. The tool accepts three formats:
-
-#### Format A: Direct Dictionary (Recommended)
-```json
-{
-  "1960476": "Patterson Farms",
-  "2022727": "App Farms",
-  "2045582": "Hart-T-Trees"
-}
-```
-
-#### Format B: Array of Records
-```json
-[
-  { "customerId": "1960476", "employerName": "Patterson Farms" },
-  { "customerId": "2022727", "employerName": "App Farms" }
-]
-```
-
-#### Format C: Employer-Keyed with Nested Workers
-```json
-{
-  "emp1": {
-    "name": "Patterson Farms",
-    "workers": ["1960476", "1960554", "1965578"]
-  },
-  "emp2": {
-    "name": "App Farms",
-    "customerIds": ["2022727", "2022743"]
-  }
-}
-```
 
 ## Classification Rules
 
