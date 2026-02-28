@@ -223,6 +223,7 @@ export function runIngestionPipeline(options: IngestOptions): IngestResult {
   let globalBookAmountCents = 0;
   let globalRemittanceAmountCents = 0;
   const transactionGroupCounts: Record<string, number> = {};
+  const transactionGroupAmounts: Record<string, number> = {};
   const vendorMatchCounts: Record<string, number> = {};
 
   // ── Employer rollup accumulators ──
@@ -276,6 +277,7 @@ export function runIngestionPipeline(options: IngestOptions): IngestResult {
       // ── Transaction type ──
       const transactionGroup = classifyTransactionType(unitType, transactionTypeRules);
       transactionGroupCounts[transactionGroup] = (transactionGroupCounts[transactionGroup] || 0) + 1;
+      // Amount per group will be accumulated after amt is calculated (below)
 
       // ── Remittance vendor ──
       const remittanceVendor = classifyRemittanceVendorFast(summary, counterpartyName, remittanceVendorRules);
@@ -354,6 +356,9 @@ export function runIngestionPipeline(options: IngestOptions): IngestResult {
       rollup.transactionCount++;
       const amt = Math.abs(amountCents);
 
+      // Per-group amount tracking
+      transactionGroupAmounts[transactionGroup] = (transactionGroupAmounts[transactionGroup] || 0) + amt;
+
       // Global volume tracking
       if (direction.toLowerCase() === "debit") {
         rollup.totalDebitCents += amt;
@@ -372,7 +377,7 @@ export function runIngestionPipeline(options: IngestOptions): IngestResult {
           rollup.atmCount++;
           rollup.atmAmountCents += amt;
           break;
-        case "Fee":
+        case "ATM Fee":
           rollup.feeCount++;
           rollup.feeAmountCents += amt;
           break;
@@ -470,6 +475,7 @@ export function runIngestionPipeline(options: IngestOptions): IngestResult {
     totalCustomers: allCustomerIds.size,
     totalEmployers: employerRollupMap.size,
     transactionGroupCounts,
+    transactionGroupAmounts,
     vendorMatchCounts,
     totalDebitCents: globalDebitCents,
     totalCreditCents: globalCreditCents,

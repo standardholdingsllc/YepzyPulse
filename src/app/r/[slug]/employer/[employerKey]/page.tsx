@@ -147,9 +147,10 @@ export default async function EmployerDetailPage({ params }: PageProps) {
             ) : (
               <div className="space-y-3">
                 {vendorEntries.map(([vendor, data]) => (
-                  <div
+                  <Link
                     key={vendor}
-                    className="flex items-center justify-between rounded-lg border border-dark-border bg-dark-bg-tertiary/50 px-4 py-3"
+                    href={`/r/${slug}/vendor/${encodeURIComponent(vendor)}`}
+                    className="flex items-center justify-between rounded-lg border border-dark-border bg-dark-bg-tertiary/50 px-4 py-3 hover:border-accent/50 hover:bg-accent/5 transition-all"
                   >
                     <div>
                       <p className="text-sm font-medium text-white">{vendor}</p>
@@ -157,10 +158,13 @@ export default async function EmployerDetailPage({ params }: PageProps) {
                         {formatNumber(data.count)} transactions
                       </p>
                     </div>
-                    <p className="text-sm font-semibold tabular-nums text-violet-400">
-                      {formatCents(data.amountCents)}
-                    </p>
-                  </div>
+                    <div className="text-right">
+                      <p className="text-sm font-semibold tabular-nums text-violet-400">
+                        {formatCents(data.amountCents)}
+                      </p>
+                      <p className="text-xs text-muted">Explore →</p>
+                    </div>
+                  </Link>
                 ))}
               </div>
             )}
@@ -173,7 +177,7 @@ export default async function EmployerDetailPage({ params }: PageProps) {
               {[
                 { label: "Card", count: rollup.cardCount, amount: rollup.cardAmountCents },
                 { label: "ATM", count: rollup.atmCount, amount: rollup.atmAmountCents },
-                { label: "Fee", count: rollup.feeCount, amount: rollup.feeAmountCents },
+                { label: "ATM Fee", count: rollup.feeCount, amount: rollup.feeAmountCents },
                 { label: "Book/Payment", count: rollup.bookCount, amount: rollup.bookAmountCents },
               ].filter(item => item.count > 0).map((item) => (
                 <div

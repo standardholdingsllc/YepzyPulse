@@ -5,6 +5,7 @@ import {
   getEmployerRollups,
   getVendorRollups,
 } from "@/lib/queries/reports";
+import { formatCents } from "@/lib/parsing/amount";
 import { KpiCards } from "@/components/kpi-cards";
 import { EmployersTable } from "@/components/employers-table";
 import { VendorSummary } from "@/components/vendor-summary";
@@ -175,7 +176,7 @@ export default async function ReportPage({ params }: PageProps) {
       {/* Two-column: Vendors + top info */}
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-1">
-          <VendorSummary rollups={vendorRollups} />
+          <VendorSummary rollups={vendorRollups} slug={slug} employerRollups={employerRollups} />
         </div>
         <div className="lg:col-span-2">
           <TransactionGroupSummary stats={report.stats} />
@@ -183,7 +184,7 @@ export default async function ReportPage({ params }: PageProps) {
       </div>
 
       {/* Employers Table */}
-      <EmployersTable rollups={employerRollups} slug={slug} />
+      <EmployersTable rollups={employerRollups} slug={slug} vendorRollups={vendorRollups} />
 
       {/* Transactions Table */}
       <TransactionsTable
@@ -196,16 +197,18 @@ export default async function ReportPage({ params }: PageProps) {
   );
 }
 
-function TransactionGroupSummary({ stats }: { stats: { transactionGroupCounts: Record<string, number> } }) {
+function TransactionGroupSummary({ stats }: { stats: { transactionGroupCounts: Record<string, number>; transactionGroupAmounts?: Record<string, number> } }) {
   const groups = Object.entries(stats.transactionGroupCounts || {}).sort(
     ([, a], [, b]) => b - a
   );
+  const amounts = stats.transactionGroupAmounts || {};
 
   const total = groups.reduce((sum, [, count]) => sum + count, 0);
 
   const colors: Record<string, string> = {
     Card: "bg-accent",
     ATM: "bg-amber-500",
+    "ATM Fee": "bg-red-500",
     Fee: "bg-red-500",
     "Book/Payment": "bg-emerald-500",
     "Transfer/Other": "bg-violet-500",
@@ -218,13 +221,19 @@ function TransactionGroupSummary({ stats }: { stats: { transactionGroupCounts: R
         {groups.map(([group, count]) => {
           const pct = total > 0 ? (count / total) * 100 : 0;
           const color = colors[group] || "bg-gray-500";
+          const amountCents = amounts[group] || 0;
           return (
             <div key={group}>
               <div className="flex items-center justify-between text-sm">
                 <span className="font-medium text-muted-light">{group}</span>
-                <span className="tabular-nums text-muted">
-                  {count.toLocaleString()} ({pct.toFixed(1)}%)
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="tabular-nums text-violet-400 font-medium">
+                    {formatCents(amountCents)}
+                  </span>
+                  <span className="tabular-nums text-muted">
+                    {count.toLocaleString()} ({pct.toFixed(1)}%)
+                  </span>
+                </div>
               </div>
               <div className="mt-1 h-2 w-full rounded-full bg-dark-bg-tertiary">
                 <div

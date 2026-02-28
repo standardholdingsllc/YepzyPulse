@@ -312,7 +312,7 @@ export function TransactionsTable({
                                 ? "info"
                                 : tx.transactionGroup === "ATM"
                                   ? "warning"
-                                  : tx.transactionGroup === "Fee"
+                                  : tx.transactionGroup === "ATM Fee"
                                     ? "danger"
                                     : "default"
                             }

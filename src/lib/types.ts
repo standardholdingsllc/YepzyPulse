@@ -77,6 +77,7 @@ export interface ReportStats {
   totalCustomers: number;
   totalEmployers: number;
   transactionGroupCounts: Record<string, number>;
+  transactionGroupAmounts: Record<string, number>;
   vendorMatchCounts: Record<string, number>;
   // Volume-based stats (cents)
   totalDebitCents: number;
