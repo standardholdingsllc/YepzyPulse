@@ -43,31 +43,47 @@ function uploadBlobViaTus(
   const projectId = new URL(supabaseUrl).hostname.split(".")[0];
   const tusEndpoint = `https://${projectId}.supabase.co/storage/v1/upload/resumable`;
 
-  return new Promise((resolve, reject) => {
-    const upload = new tus.Upload(blob, {
-      endpoint: tusEndpoint,
-      retryDelays: [0, 1000, 3000, 5000, 10000],
-      headers: {
-        authorization: `Bearer ${anonKey}`,
-        "x-upsert": "true",
-      },
-      uploadDataDuringCreation: true,
-      removeFingerprintOnSuccess: true,
-      chunkSize: TUS_CHUNK_SIZE,
-      metadata: {
-        bucketName: BUCKET,
-        objectName: storagePath,
-        contentType,
-        cacheControl: "3600",
-      },
-      onError: (err) => reject(err),
-      onProgress: (bytesUploaded, bytesTotal) => {
-        onProgress?.(Math.round((bytesUploaded / bytesTotal) * 100));
-      },
-      onSuccess: () => resolve(),
+  const attemptUpload = (attemptContentType: string): Promise<void> =>
+    new Promise((resolve, reject) => {
+      const upload = new tus.Upload(blob, {
+        endpoint: tusEndpoint,
+        retryDelays: [0, 1000, 3000, 5000, 10000],
+        headers: {
+          authorization: `Bearer ${anonKey}`,
+          "x-upsert": "true",
+        },
+        uploadDataDuringCreation: true,
+        removeFingerprintOnSuccess: true,
+        chunkSize: TUS_CHUNK_SIZE,
+        metadata: {
+          bucketName: BUCKET,
+          objectName: storagePath,
+          contentType: attemptContentType,
+          cacheControl: "3600",
+        },
+        onError: (err) => reject(err),
+        onProgress: (bytesUploaded, bytesTotal) => {
+          onProgress?.(Math.round((bytesUploaded / bytesTotal) * 100));
+        },
+        onSuccess: () => resolve(),
+      });
+
+      upload.start();
     });
 
-    upload.start();
+  return attemptUpload(contentType).catch((err) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    const unsupportedJsonMime =
+      contentType === "application/json" &&
+      /mime type application\/json is not supported|response code:\s*415/i.test(msg);
+
+    if (unsupportedJsonMime) {
+      // Some Supabase buckets are restricted to CSV MIME types only.
+      // Keep JSON payload, but upload with CSV-compatible contentType metadata.
+      return attemptUpload("text/csv");
+    }
+
+    throw err;
   });
 }
 
