@@ -4,7 +4,6 @@ import {
   getReportBySlug,
   getEmployerRollups,
   getVendorRollups,
-  getTransactions,
 } from "@/lib/queries/reports";
 import { KpiCards } from "@/components/kpi-cards";
 import { EmployersTable } from "@/components/employers-table";
@@ -118,11 +117,10 @@ export default async function ReportPage({ params }: PageProps) {
     );
   }
 
-  // Fetch all data in parallel
-  const [employerRollups, vendorRollups, initialTxData] = await Promise.all([
+  // Fetch rollup data in parallel (transactions are loaded client-side from blob)
+  const [employerRollups, vendorRollups] = await Promise.all([
     getEmployerRollups(report.id),
     getVendorRollups(report.id),
-    getTransactions({ reportId: report.id, page: 1, pageSize: 50 }),
   ]);
 
   const transactionGroups = Object.keys(report.stats.transactionGroupCounts || {});
@@ -185,8 +183,6 @@ export default async function ReportPage({ params }: PageProps) {
       <TransactionsTable
         reportId={report.id}
         slug={slug}
-        initialTransactions={initialTxData.transactions}
-        initialTotal={initialTxData.total}
         transactionGroups={transactionGroups}
         vendorNames={vendorNames}
       />

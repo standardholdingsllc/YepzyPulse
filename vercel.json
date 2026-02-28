@@ -3,10 +3,12 @@
   "framework": "nextjs",
   "functions": {
     "src/app/api/generate-report/route.ts": {
-      "maxDuration": 60
+      "maxDuration": 60,
+      "memory": 1024
     },
     "src/app/api/process-report/route.ts": {
-      "maxDuration": 300
+      "maxDuration": 300,
+      "memory": 3009
     }
   },
   "crons": [

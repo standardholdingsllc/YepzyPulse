@@ -1,10 +1,13 @@
 /**
  * Store ingestion results into Supabase.
+ *
+ * Updated to use the streaming pipeline's output:
+ * - CompactTransaction[] → stored as JSON blob (not individual DB rows)
+ * - CustomerLocationRow[] → inserted to DB (no extra iteration over transactions)
  */
 
 import { createServiceClient } from "@/lib/supabase";
 import type {
-  NormalizedTransaction,
   EmployerRollup,
   VendorRollup,
   ReportStats,
@@ -12,7 +15,7 @@ import type {
 } from "@/lib/types";
 import type { TransactionTypeRule } from "@/lib/classification/transaction-types";
 import type { RemittanceVendorRule } from "@/lib/classification/remittance-vendors";
-import { classifyCustomersInUs } from "@/lib/parsing/location";
+import type { CompactTransaction, CustomerLocationRow } from "@/lib/pipeline/ingest";
 
 interface StoreReportOptions {
   slug: string;
@@ -22,13 +25,15 @@ interface StoreReportOptions {
     transactionTypeRules: TransactionTypeRule[];
     remittanceVendorRules: RemittanceVendorRule[];
   };
-  transactions: NormalizedTransaction[];
+  compactTransactions: CompactTransaction[];
   employerRollups: EmployerRollup[];
   vendorRollups: VendorRollup[];
+  customerLocationRows: CustomerLocationRow[];
   stats: ReportStats;
 }
 
 const BATCH_SIZE = 500;
+const TRANSACTIONS_BUCKET = "csv-uploads";
 
 export async function storeReport(options: StoreReportOptions): Promise<string> {
   const supabase = createServiceClient();
@@ -55,47 +60,20 @@ export async function storeReport(options: StoreReportOptions): Promise<string> 
   const reportId = report.id;
 
   try {
-    // 2. Insert transactions in batches
-    console.log(`[Store] Inserting ${options.transactions.length} transactions...`);
-    for (let i = 0; i < options.transactions.length; i += BATCH_SIZE) {
-      const batch = options.transactions.slice(i, i + BATCH_SIZE);
-      const rows = batch.map((tx) => ({
-        report_id: reportId,
-        raw_created_at: tx.rawCreatedAt?.toISOString() || null,
-        unit_id: tx.unitId || null,
-        unit_type: tx.unitType || null,
-        amount_cents: tx.amountCents,
-        direction: tx.direction || null,
-        balance_cents: tx.balanceCents,
-        summary: tx.summary || null,
-        customer_id: tx.customerId || null,
-        account_id: tx.accountId || null,
-        counterparty_name: tx.counterpartyName || null,
-        counterparty_customer: tx.counterpartyCustomer || null,
-        counterparty_account: tx.counterpartyAccount || null,
-        payment_id: tx.paymentId || null,
-        transaction_group: tx.transactionGroup,
-        remittance_vendor: tx.remittanceVendor,
-        vendor_match_evidence: tx.vendorMatchEvidence || null,
-        employer_name: tx.employerName,
-        employer_key: tx.employerKey,
-        location_raw: tx.locationRaw || null,
-        location_city: tx.locationCity || null,
-        location_state: tx.locationState || null,
-        location_country: tx.locationCountry || null,
-        customer_in_us: tx.customerInUs,
-      }));
+    // 2. Store transactions as JSON blob (instead of individual DB rows)
+    console.log(`[Store] Storing ${options.compactTransactions.length} transactions as blob...`);
+    const transactionsBlobPath = `transactions/${options.slug}.json`;
+    const transactionsJson = JSON.stringify(options.compactTransactions);
+    const transactionsBlob = new Blob([transactionsJson], { type: "application/json" });
 
-      const { error } = await supabase
-        .from("report_transactions")
-        .insert(rows);
+    const { error: uploadError } = await supabase.storage
+      .from(TRANSACTIONS_BUCKET)
+      .upload(transactionsBlobPath, transactionsBlob, { upsert: true });
 
-      if (error) {
-        throw new Error(`Failed to insert transactions batch ${i}: ${error.message}`);
-      }
-
-      console.log(`[Store] Inserted batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(options.transactions.length / BATCH_SIZE)}`);
+    if (uploadError) {
+      throw new Error(`Failed to upload transactions blob: ${uploadError.message}`);
     }
+    console.log(`[Store] Uploaded ${(transactionsJson.length / 1024 / 1024).toFixed(1)}MB transactions blob`);
 
     // 3. Insert employer rollups
     console.log(`[Store] Inserting ${options.employerRollups.length} employer rollups...`);
@@ -129,7 +107,6 @@ export async function storeReport(options: StoreReportOptions): Promise<string> 
         const { error } = await supabase
           .from("report_employer_rollups")
           .insert(batch);
-
         if (error) {
           throw new Error(`Failed to insert employer rollups: ${error.message}`);
         }
@@ -150,70 +127,36 @@ export async function storeReport(options: StoreReportOptions): Promise<string> 
       const { error } = await supabase
         .from("report_vendor_rollups")
         .insert(vendorRows);
-
       if (error) {
         throw new Error(`Failed to insert vendor rollups: ${error.message}`);
       }
     }
 
-    // 5. Insert customer locations
-    console.log("[Store] Inserting customer locations...");
-    const customerLocationResults = classifyCustomersInUs(
-      options.transactions.map((tx) => ({
-        customerId: tx.customerId,
-        unitType: tx.unitType,
-        summary: tx.summary,
-        createdAt: tx.rawCreatedAt,
-      }))
-    );
+    // 5. Insert customer locations (already computed by pipeline — no extra iterations!)
+    console.log(`[Store] Inserting ${options.customerLocationRows.length} customer locations...`);
+    if (options.customerLocationRows.length > 0) {
+      const locationRows = options.customerLocationRows.map((loc) => ({
+        report_id: reportId,
+        customer_id: loc.customerId,
+        employer_name: loc.employerName,
+        employer_key: loc.employerKey,
+        in_us: loc.inUs,
+        latest_location_raw: loc.latestLocationRaw,
+        latest_location_city: loc.latestLocationCity,
+        latest_location_state: loc.latestLocationState,
+        latest_location_country: loc.latestLocationCountry,
+        latest_location_date: loc.latestLocationDate,
+        transaction_count: loc.transactionCount,
+      }));
 
-    // Count transactions per customer
-    const txCountPerCustomer = new Map<string, number>();
-    for (const tx of options.transactions) {
-      txCountPerCustomer.set(
-        tx.customerId,
-        (txCountPerCustomer.get(tx.customerId) || 0) + 1
-      );
-    }
-
-    // Get employer info per customer
-    const customerEmployers = new Map<string, { name: string; key: string }>();
-    for (const tx of options.transactions) {
-      if (!customerEmployers.has(tx.customerId)) {
-        customerEmployers.set(tx.customerId, {
-          name: tx.employerName,
-          key: tx.employerKey,
-        });
-      }
-    }
-
-    const locationRows = Array.from(customerLocationResults.entries()).map(
-      ([customerId, loc]) => {
-        const emp = customerEmployers.get(customerId);
-        return {
-          report_id: reportId,
-          customer_id: customerId,
-          employer_name: emp?.name || "Unknown employer",
-          employer_key: emp?.key || "UNKNOWN EMPLOYER",
-          in_us: loc.inUs,
-          latest_location_raw: loc.latestLocationRaw,
-          latest_location_city: loc.latestLocationCity,
-          latest_location_state: loc.latestLocationState,
-          latest_location_country: loc.latestLocationCountry,
-          latest_location_date: loc.latestLocationDate?.toISOString() || null,
-          transaction_count: txCountPerCustomer.get(customerId) || 0,
-        };
-      }
-    );
-
-    for (let i = 0; i < locationRows.length; i += BATCH_SIZE) {
-      const batch = locationRows.slice(i, i + BATCH_SIZE);
-      const { error } = await supabase
-        .from("report_customer_locations")
-        .insert(batch);
-
-      if (error) {
-        throw new Error(`Failed to insert customer locations: ${error.message}`);
+      for (let i = 0; i < locationRows.length; i += BATCH_SIZE) {
+        const batch = locationRows.slice(i, i + BATCH_SIZE);
+        const { error } = await supabase
+          .from("report_customer_locations")
+          .insert(batch);
+        if (error) {
+          throw new Error(`Failed to insert customer locations: ${error.message}`);
+        }
       }
     }
 
@@ -221,7 +164,10 @@ export async function storeReport(options: StoreReportOptions): Promise<string> 
     console.log("[Store] Marking report as ready...");
     await supabase
       .from("reports")
-      .update({ status: "ready" })
+      .update({
+        status: "ready",
+        transactions_blob_path: transactionsBlobPath,
+      })
       .eq("id", reportId);
 
     return reportId;

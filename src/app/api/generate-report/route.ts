@@ -134,7 +134,7 @@ export async function POST(request: NextRequest) {
       console.log("[API] Proceeding without employer mapping");
     }
 
-    // Run pipeline
+    // Run pipeline (streaming — memory-optimized)
     console.log("[API] Running ingestion pipeline...");
     const result = runIngestionPipeline({
       csvText,
@@ -154,9 +154,10 @@ export async function POST(request: NextRequest) {
         transactionTypeRules: DEFAULT_TRANSACTION_TYPE_RULES,
         remittanceVendorRules: DEFAULT_REMITTANCE_VENDOR_RULES,
       },
-      transactions: result.transactions,
+      compactTransactions: result.compactTransactions,
       employerRollups: result.employerRollups,
       vendorRollups: result.vendorRollups,
+      customerLocationRows: result.customerLocationRows,
       stats: result.stats,
     });
 

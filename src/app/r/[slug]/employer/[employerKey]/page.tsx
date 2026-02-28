@@ -4,7 +4,6 @@ import {
   getReportBySlug,
   getEmployerRollups,
   getCustomerLocations,
-  getTransactions,
 } from "@/lib/queries/reports";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -25,16 +24,10 @@ export default async function EmployerDetailPage({ params }: PageProps) {
     notFound();
   }
 
-  // Fetch employer data
-  const [allRollups, workers, txData] = await Promise.all([
+  // Fetch employer data (transactions are loaded client-side from blob)
+  const [allRollups, workers] = await Promise.all([
     getEmployerRollups(report.id),
     getCustomerLocations(report.id, decodedKey),
-    getTransactions({
-      reportId: report.id,
-      employerKey: decodedKey,
-      page: 1,
-      pageSize: 50,
-    }),
   ]);
 
   const rollup = allRollups.find((r) => r.employerKey === decodedKey);
@@ -199,8 +192,6 @@ export default async function EmployerDetailPage({ params }: PageProps) {
       <TransactionsTable
         reportId={report.id}
         slug={slug}
-        initialTransactions={txData.transactions}
-        initialTotal={txData.total}
         transactionGroups={transactionGroups}
         vendorNames={vendorNames}
       />
