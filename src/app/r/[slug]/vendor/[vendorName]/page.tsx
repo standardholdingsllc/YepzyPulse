@@ -9,6 +9,7 @@ import { formatCents } from "@/lib/parsing/amount";
 import { formatNumber } from "@/lib/utils";
 import { getVendorInterchangeRate, formatInterchangeRate } from "@/lib/vendor-interchange-rates";
 import { VendorEmployerTable } from "./vendor-employer-table";
+import { VendorCustomerTable } from "./vendor-customer-table";
 
 interface PageProps {
   params: Promise<{ slug: string; vendorName: string }>;
@@ -177,6 +178,12 @@ export default async function VendorDetailPage({ params }: PageProps) {
         data={employerVendorData}
         vendorName={vendorName}
         slug={slug}
+      />
+
+      {/* Top customers using this vendor */}
+      <VendorCustomerTable
+        slug={slug}
+        vendorName={vendorName}
       />
     </div>
   );
