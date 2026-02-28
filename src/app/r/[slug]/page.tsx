@@ -28,9 +28,18 @@ export default async function ReportPage({ params }: PageProps) {
   }
 
   if (report.status === "processing") {
-    // Check if processing has been stuck for too long (> 6 minutes = 360 seconds)
-    // This catches jobs that timed out without updating status
-    const STALE_THRESHOLD_MS = 6 * 60 * 1000; // 6 minutes
+    // Check chunk progress from stats
+    const stats = report.stats as { processingChunks?: number; currentChunk?: number } | null;
+    const totalChunks = stats?.processingChunks || 0;
+    const currentChunk = stats?.currentChunk || 0;
+    const isChunkedProcessing = totalChunks > 1;
+    
+    // For chunked processing, extend the timeout threshold per chunk
+    // Each chunk gets ~4 minutes, so total allowed = chunks * 4 min
+    const STALE_THRESHOLD_MS = isChunkedProcessing 
+      ? Math.max(10 * 60 * 1000, totalChunks * 4 * 60 * 1000) // At least 10 min, or 4 min per chunk
+      : 6 * 60 * 1000; // 6 minutes for non-chunked
+    
     const processingStarted = report.processingStartedAt
       ? new Date(report.processingStartedAt).getTime()
       : new Date(report.createdAt).getTime();
@@ -46,13 +55,14 @@ export default async function ReportPage({ params }: PageProps) {
             </svg>
             <h2 className="text-xl font-semibold text-red-400 mb-2">Processing Timed Out</h2>
             <p className="text-sm text-red-300 mb-4">
-              Your file was too large to process within the time limit. This typically happens with files over 100MB.
+              Your file was too large to process within the time limit.
             </p>
             <p className="text-xs text-muted mb-4">
-              Processing started {Math.round(elapsedMs / 60000)} minutes ago and appears to have stalled.
+              Processing started {Math.round(elapsedMs / 60000)} minutes ago
+              {isChunkedProcessing && ` (chunk ${currentChunk}/${totalChunks})`}.
             </p>
             <Link href="/" className="inline-block rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover transition-colors">
-              ← Try with a smaller file
+              ← Try again
             </Link>
           </div>
         </div>
@@ -68,8 +78,24 @@ export default async function ReportPage({ params }: PageProps) {
           </svg>
           <h2 className="text-xl font-semibold text-white mb-2">Processing Your Report</h2>
           <p className="text-sm text-muted-light mb-4">
-            Your CSV file is being processed in the background. This may take a few minutes for large files.
+            {isChunkedProcessing 
+              ? `Processing large file in chunks (${currentChunk}/${totalChunks})...`
+              : "Your CSV file is being processed in the background."
+            }
           </p>
+          {isChunkedProcessing && (
+            <div className="mb-4">
+              <div className="h-2 w-full rounded-full bg-dark-bg-tertiary overflow-hidden">
+                <div 
+                  className="h-full bg-accent transition-all duration-500"
+                  style={{ width: `${Math.round((currentChunk / totalChunks) * 100)}%` }}
+                />
+              </div>
+              <p className="mt-2 text-xs text-muted">
+                {Math.round((currentChunk / totalChunks) * 100)}% complete
+              </p>
+            </div>
+          )}
           <div className="flex items-center justify-center gap-2 text-xs text-muted">
             <div className="h-2 w-2 rounded-full bg-accent animate-pulse" />
             <span>Auto-refreshing every 5 seconds...</span>
