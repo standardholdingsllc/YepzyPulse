@@ -35,6 +35,7 @@ interface Transaction {
 
 interface TransactionsTableProps {
   reportId: string;
+  slug: string;
   initialTransactions: Transaction[];
   initialTotal: number;
   transactionGroups: string[];
@@ -43,6 +44,7 @@ interface TransactionsTableProps {
 
 export function TransactionsTable({
   reportId,
+  slug,
   initialTransactions,
   initialTotal,
   transactionGroups,
@@ -69,6 +71,7 @@ export function TransactionsTable({
     try {
       const params = new URLSearchParams({
         reportId,
+        slug,
         page: String(pageNum),
         pageSize: String(pageSize),
       });
@@ -92,7 +95,7 @@ export function TransactionsTable({
     } finally {
       setLoading(false);
     }
-  }, [reportId]);
+  }, [reportId, slug]);
 
   useEffect(() => {
     if (page === 1 && !filters.transactionGroup && !filters.remittanceVendor && !filters.inUs) {

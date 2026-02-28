@@ -198,6 +198,7 @@ export default async function EmployerDetailPage({ params }: PageProps) {
       {/* Transactions for this employer */}
       <TransactionsTable
         reportId={report.id}
+        slug={slug}
         initialTransactions={txData.transactions}
         initialTotal={txData.total}
         transactionGroups={transactionGroups}

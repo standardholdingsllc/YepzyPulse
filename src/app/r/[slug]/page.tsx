@@ -184,6 +184,7 @@ export default async function ReportPage({ params }: PageProps) {
       {/* Transactions Table */}
       <TransactionsTable
         reportId={report.id}
+        slug={slug}
         initialTransactions={initialTxData.transactions}
         initialTotal={initialTxData.total}
         transactionGroups={transactionGroups}
