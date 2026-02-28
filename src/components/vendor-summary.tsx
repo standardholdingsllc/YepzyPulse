@@ -2,29 +2,8 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCents } from "@/lib/parsing/amount";
 import { formatNumber } from "@/lib/utils";
+import { getVendorInterchangeRate, formatInterchangeRate } from "@/lib/vendor-interchange-rates";
 import type { VendorRollup, EmployerRollup } from "@/lib/types";
-
-// Average interchange rates from vendor data (from vendor-summary.xlsx)
-const VENDOR_INTERCHANGE_RATES: Record<string, number> = {
-  "Remitly": 0.079,
-  "TapTap Send": 1.261,
-  "RIA": 1.253,
-  "Boss Money": 1.255,
-  "Felix": 1.256,
-  "Felix Pago": 1.256,
-  "MaxiTransfers": 0.572,
-  "Omni Money Transfer": 0.501,
-  "Viamericas": 0.505,
-  "Western Union": 0.062,
-  "MoneyGram": 0.073,
-  "Uniteller": 1.341,
-  "Pangea": 0.018,
-  "MyBambu": 0.891,
-  "Xoom": 0.035,
-  "Tornado Bus": 0.138,
-  "WorldRemit": 0.075,
-  "Intermex": 0.50, // Estimated based on similar vendors
-};
 
 interface VendorSummaryProps {
   rollups: VendorRollup[];
@@ -62,14 +41,14 @@ export function VendorSummary({ rollups, slug, employerRollups }: VendorSummaryP
           <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
             {sorted.map((v) => {
               const employerCount = vendorEmployerCounts[v.vendorName] || 0;
-              const interchangeRate = VENDOR_INTERCHANGE_RATES[v.vendorName];
+              const interchangeRate = getVendorInterchangeRate(v.vendorName);
               const content = (
                 <div className={`flex items-center justify-between rounded-lg border border-dark-border bg-dark-bg-tertiary/50 px-4 py-3 transition-all ${slug ? "hover:border-accent/50 hover:bg-accent/5 cursor-pointer" : ""}`}>
                   <div>
                     <p className="text-sm font-medium text-white">
                       {v.vendorName}
                       {interchangeRate !== undefined && (
-                        <span className="ml-2 text-orange-400">{interchangeRate.toFixed(2)}%</span>
+                        <span className="ml-2 text-orange-400">{formatInterchangeRate(interchangeRate)}</span>
                       )}
                     </p>
                     <p className="text-xs text-muted">
@@ -77,14 +56,9 @@ export function VendorSummary({ rollups, slug, employerRollups }: VendorSummaryP
                       {employerCount > 0 && ` · ${formatNumber(employerCount)} employers`}
                     </p>
                   </div>
-                  <div className="text-right">
-                    <p className="text-sm font-semibold tabular-nums text-violet-400">
-                      {formatCents(v.totalAmountCents)}
-                    </p>
-                    {slug && (
-                      <p className="text-xs text-muted">Explore →</p>
-                    )}
-                  </div>
+                  <p className="text-sm font-semibold tabular-nums text-violet-400">
+                    {formatCents(v.totalAmountCents)}
+                  </p>
                 </div>
               );
 

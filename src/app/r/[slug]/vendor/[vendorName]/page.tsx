@@ -7,29 +7,8 @@ import {
 } from "@/lib/queries/reports";
 import { formatCents } from "@/lib/parsing/amount";
 import { formatNumber } from "@/lib/utils";
+import { getVendorInterchangeRate, formatInterchangeRate } from "@/lib/vendor-interchange-rates";
 import { VendorEmployerTable } from "./vendor-employer-table";
-
-// Average interchange rates from vendor data (from vendor-summary.xlsx)
-const VENDOR_INTERCHANGE_RATES: Record<string, number> = {
-  "Remitly": 0.079,
-  "TapTap Send": 1.261,
-  "RIA": 1.253,
-  "Boss Money": 1.255,
-  "Felix": 1.256,
-  "Felix Pago": 1.256,
-  "MaxiTransfers": 0.572,
-  "Omni Money Transfer": 0.501,
-  "Viamericas": 0.505,
-  "Western Union": 0.062,
-  "MoneyGram": 0.073,
-  "Uniteller": 1.341,
-  "Pangea": 0.018,
-  "MyBambu": 0.891,
-  "Xoom": 0.035,
-  "Tornado Bus": 0.138,
-  "WorldRemit": 0.075,
-  "Intermex": 0.50,
-};
 
 interface PageProps {
   params: Promise<{ slug: string; vendorName: string }>;
@@ -111,16 +90,16 @@ export default async function VendorDetailPage({ params }: PageProps) {
         </Link>
         <h2 className="mt-2 text-2xl font-bold text-white">
           {vendorName}
-          {VENDOR_INTERCHANGE_RATES[vendorName] !== undefined && (
+          {getVendorInterchangeRate(vendorName) !== undefined && (
             <span className="ml-3 text-orange-400 text-lg font-semibold">
-              {VENDOR_INTERCHANGE_RATES[vendorName].toFixed(2)}%
+              {formatInterchangeRate(getVendorInterchangeRate(vendorName)!)}
             </span>
           )}
         </h2>
         <p className="text-sm text-muted">
           Remittance vendor analysis ·{" "}
           {formatNumber(employerVendorData.length)} employers use this vendor
-          {VENDOR_INTERCHANGE_RATES[vendorName] !== undefined && (
+          {getVendorInterchangeRate(vendorName) !== undefined && (
             <> · <span className="text-orange-400">Avg interchange rate</span></>
           )}
         </p>

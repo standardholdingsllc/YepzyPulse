@@ -202,6 +202,7 @@ function TransactionGroupSummary({ stats }: { stats: { transactionGroupCounts: R
     ([, a], [, b]) => b - a
   );
   const amounts = stats.transactionGroupAmounts || {};
+  const hasAmounts = Object.keys(amounts).length > 0 && Object.values(amounts).some(v => v > 0);
 
   const total = groups.reduce((sum, [, count]) => sum + count, 0);
 
@@ -227,9 +228,11 @@ function TransactionGroupSummary({ stats }: { stats: { transactionGroupCounts: R
               <div className="flex items-center justify-between text-sm">
                 <span className="font-medium text-muted-light">{group}</span>
                 <div className="flex items-center gap-3">
-                  <span className="tabular-nums text-violet-400 font-medium">
-                    {formatCents(amountCents)}
-                  </span>
+                  {hasAmounts && (
+                    <span className="tabular-nums text-violet-400 font-medium">
+                      {formatCents(amountCents)}
+                    </span>
+                  )}
                   <span className="tabular-nums text-muted">
                     {count.toLocaleString()} ({pct.toFixed(1)}%)
                   </span>
