@@ -4,20 +4,85 @@ import { useState, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useRouter } from "next/navigation";
 import * as tus from "tus-js-client";
+import { runIngestionPipeline, type IngestResult } from "@/lib/pipeline/ingest";
+import { DEFAULT_TRANSACTION_TYPE_RULES } from "@/lib/classification/transaction-types";
+import { DEFAULT_REMITTANCE_VENDOR_RULES } from "@/lib/classification/remittance-vendors";
+import { generateSlug } from "@/lib/utils";
 
 type InUsFilter = "strict" | "lenient" | "all";
+type Stage = "idle" | "reading" | "mapping" | "processing" | "uploading" | "saving" | "done";
+
+const EMPLOYER_MAPPING_URL =
+  "https://raw.githubusercontent.com/standardholdingsllc/hubspot-address-mapper/refs/heads/main/web-app/data/customer_company.json";
+
+const BUCKET = "csv-uploads";
+const TUS_CHUNK_SIZE = 6 * 1024 * 1024; // 6MB – required by Supabase Storage
+const MAX_FILE_SIZE_MB = 500;
+
+const STAGE_MESSAGES: Record<Stage, string> = {
+  idle: "",
+  reading: "Reading file…",
+  mapping: "Loading employer data…",
+  processing: "Processing transactions locally…",
+  uploading: "Uploading results…",
+  saving: "Saving report…",
+  done: "Done! Redirecting…",
+};
+
+/**
+ * Upload a Blob to Supabase Storage via TUS resumable protocol.
+ */
+function uploadBlobViaTus(
+  blob: Blob,
+  storagePath: string,
+  supabaseUrl: string,
+  anonKey: string,
+  contentType: string,
+  onProgress?: (pct: number) => void,
+): Promise<void> {
+  const projectId = new URL(supabaseUrl).hostname.split(".")[0];
+  const tusEndpoint = `https://${projectId}.supabase.co/storage/v1/upload/resumable`;
+
+  return new Promise((resolve, reject) => {
+    const upload = new tus.Upload(blob, {
+      endpoint: tusEndpoint,
+      retryDelays: [0, 1000, 3000, 5000, 10000],
+      headers: {
+        authorization: `Bearer ${anonKey}`,
+        "x-upsert": "true",
+      },
+      uploadDataDuringCreation: true,
+      removeFingerprintOnSuccess: true,
+      chunkSize: TUS_CHUNK_SIZE,
+      metadata: {
+        bucketName: BUCKET,
+        objectName: storagePath,
+        contentType,
+        cacheControl: "3600",
+      },
+      onError: (err) => reject(err),
+      onProgress: (bytesUploaded, bytesTotal) => {
+        onProgress?.(Math.round((bytesUploaded / bytesTotal) * 100));
+      },
+      onSuccess: () => resolve(),
+    });
+
+    upload.start();
+  });
+}
 
 export function UploadForm() {
   const router = useRouter();
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [inUsFilter, setInUsFilter] = useState<InUsFilter>("strict");
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
+  const [stage, setStage] = useState<Stage>("idle");
   const [progress, setProgress] = useState("");
-  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadPct, setUploadPct] = useState(0);
   const [error, setError] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const csvInputRef = useRef<HTMLInputElement>(null);
+
+  const isProcessing = stage !== "idle";
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -38,190 +103,196 @@ export function UploadForm() {
     }
   };
 
-  // All uploads go to Supabase Storage via TUS resumable protocol.
-  const MAX_FILE_SIZE_MB = 500; // Max file size supported
-  const TUS_CHUNK_SIZE = 6 * 1024 * 1024; // 6 MB – required by Supabase Storage
-  const UPLOAD_TOTAL_TIMEOUT_MS = 10 * 60 * 1000; // 10 minute hard cap
-
-  /** Structured client-side logger that timestamps every upload event. */
-  const log = (phase: string, msg: string, data?: Record<string, unknown>) => {
-    const ts = new Date().toISOString();
-    const prefix = `[Upload:${phase}]`;
-    if (data) {
-      console.log(`${ts} ${prefix} ${msg}`, data);
-    } else {
-      console.log(`${ts} ${prefix} ${msg}`);
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isProcessing) {
-      return;
-    }
+    if (isProcessing || !csvFile) return;
 
-    if (!csvFile) {
-      setError("Please select a CSV file");
-      return;
-    }
-
-    // Client-side file size check
     if (csvFile.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-      setError(`File is too large (${(csvFile.size / 1024 / 1024).toFixed(1)}MB). Maximum allowed size is ${MAX_FILE_SIZE_MB}MB.`);
+      setError(`File too large (${(csvFile.size / 1024 / 1024).toFixed(1)}MB). Max ${MAX_FILE_SIZE_MB}MB.`);
       return;
     }
 
-    setIsProcessing(true);
     setError("");
-    setUploadProgress(0);
-
-    const fileSizeMB = csvFile.size / 1024 / 1024;
-    log("init", `Starting upload – size: ${fileSizeMB.toFixed(1)}MB, type: "${csvFile.type}", mode: tus-resumable`);
+    const fileSizeMB = (csvFile.size / 1024 / 1024).toFixed(1);
+    const totalStart = Date.now();
 
     try {
-      // 1. Get storage path and credentials from the server
-      setProgress(`Uploading file (${fileSizeMB.toFixed(1)}MB)...`);
-      setIsUploading(true);
+      // ─── 1. Read CSV file as text ───
+      setStage("reading");
+      setProgress(`Reading file (${fileSizeMB}MB)…`);
+      console.log(`[Client] Reading CSV file: ${csvFile.name} (${fileSizeMB}MB)`);
 
-      log("setup", "Requesting upload path from /api/get-upload-url");
-      const urlRes = await fetch("/api/get-upload-url", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filename: csvFile.name }),
-      });
+      const csvText = await csvFile.text();
+      console.log(`[Client] File read: ${csvText.length} chars in ${Date.now() - totalStart}ms`);
 
-      if (!urlRes.ok) {
-        const urlErr = await urlRes.json().catch(() => ({}));
-        throw new Error(urlErr.error || `Failed to get upload URL (${urlRes.status})`);
+      // ─── 2. Fetch employer mapping ───
+      setStage("mapping");
+      setProgress("Loading employer data…");
+
+      let employerMappingJson: unknown = {};
+      try {
+        const res = await fetch(EMPLOYER_MAPPING_URL);
+        if (res.ok) {
+          employerMappingJson = await res.json();
+          console.log("[Client] Employer mapping loaded");
+        }
+      } catch (err) {
+        console.warn("[Client] Failed to fetch employer mapping, continuing without it:", err);
       }
 
-      const { storagePath, supabaseUrl, anonKey, bucket } = await urlRes.json();
-      log("setup", `Storage path: ${storagePath}, bucket: ${bucket}`);
+      // ─── 3. Run ingestion pipeline LOCALLY ───
+      setStage("processing");
+      const rowEstimate = csvText.split("\n").length - 1;
+      setProgress(`Processing ~${rowEstimate.toLocaleString()} transactions locally… this may take a minute.`);
 
-      // 2. Upload via TUS resumable protocol
-      // Extract project ID from supabaseUrl (e.g., https://abc123.supabase.co -> abc123)
-      const projectId = new URL(supabaseUrl).hostname.split(".")[0];
-      const tusEndpoint = `https://${projectId}.supabase.co/storage/v1/upload/resumable`;
-      log("tus", `TUS endpoint: ${tusEndpoint}, chunk size: ${TUS_CHUNK_SIZE / 1024 / 1024}MB`);
+      // Yield to UI so the "Processing…" message renders before the CPU-intensive work
+      await new Promise((r) => setTimeout(r, 100));
 
-      const storagPathForTus = await new Promise<string>((resolve, reject) => {
-        const startTime = Date.now();
-        let progressEventCount = 0;
-
-        // Hard timeout
-        const totalTimer = setTimeout(() => {
-          const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-          log("tus", `Total timeout after ${elapsed}s. Aborting.`);
-          tusUpload.abort(true);
-          reject(new Error(`Upload timed out after ${UPLOAD_TOTAL_TIMEOUT_MS / 1000}s`));
-        }, UPLOAD_TOTAL_TIMEOUT_MS);
-
-        const fileContentType = csvFile!.type || "text/csv";
-        log("tus", `File metadata: size=${csvFile!.size}, contentType=${fileContentType}`);
-
-        const tusUpload = new tus.Upload(csvFile!, {
-          endpoint: tusEndpoint,
-          retryDelays: [0, 1000, 3000, 5000, 10000, 20000],
-          headers: {
-            authorization: `Bearer ${anonKey}`,
-            "x-upsert": "true",
-          },
-          uploadDataDuringCreation: true,
-          removeFingerprintOnSuccess: true,
-          chunkSize: TUS_CHUNK_SIZE,
-          metadata: {
-            bucketName: bucket,
-            objectName: storagePath,
-            contentType: fileContentType,
-            cacheControl: "3600",
-          },
-          onBeforeRequest: (req) => {
-            log("tus", `Request: ${req.getMethod()} ${req.getURL()}`);
-          },
-          onAfterResponse: (req, res) => {
-            log("tus", `Response: ${res.getStatus()} for ${req.getMethod()}`);
-          },
-          onError: (err) => {
-            clearTimeout(totalTimer);
-            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-            log("tus", `Upload FAILED after ${elapsed}s: ${err.message}`, {
-              progressEvents: progressEventCount,
-            });
-            reject(err);
-          },
-          onProgress: (bytesUploaded, bytesTotal) => {
-            progressEventCount++;
-            const percent = Math.round((bytesUploaded / bytesTotal) * 100);
-            setUploadProgress(percent);
-            setProgress(`Uploading file… ${percent}%`);
-
-            if (progressEventCount <= 3 || progressEventCount % 10 === 0 || percent >= 100) {
-              const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-              log("tus", `Progress: ${percent}% (${(bytesUploaded / 1024 / 1024).toFixed(1)}MB / ${(bytesTotal / 1024 / 1024).toFixed(1)}MB) – event #${progressEventCount} – ${elapsed}s elapsed`);
-            }
-          },
-          onSuccess: () => {
-            clearTimeout(totalTimer);
-            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-            log("tus", `Upload completed in ${elapsed}s`, {
-              storagePath,
-              progressEvents: progressEventCount,
-            });
-            resolve(storagePath);
-          },
-        });
-
-        // Check for a previous incomplete upload to resume
-        tusUpload.findPreviousUploads().then((previousUploads) => {
-          if (previousUploads.length > 0) {
-            log("tus", "Found previous incomplete upload, resuming…");
-            tusUpload.resumeFromPreviousUpload(previousUploads[0]);
-          }
-          tusUpload.start();
-        });
+      const pipelineStart = Date.now();
+      const result: IngestResult = runIngestionPipeline({
+        csvText,
+        employerMappingJson,
+        transactionTypeRules: DEFAULT_TRANSACTION_TYPE_RULES,
+        remittanceVendorRules: DEFAULT_REMITTANCE_VENDOR_RULES,
       });
 
-      setProgress("File uploaded! Starting processing…");
-      setUploadProgress(100);
-      setIsUploading(false);
+      const pipelineMs = Date.now() - pipelineStart;
+      console.log(`[Client] Pipeline complete: ${result.stats.totalRows} txns in ${(pipelineMs / 1000).toFixed(1)}s`);
+      setProgress(`Processed ${result.stats.totalRows.toLocaleString()} transactions in ${(pipelineMs / 1000).toFixed(1)}s`);
 
-      // 3. Start processing with the storage path (no CSV body sent)
-      log("process", `Calling /api/generate-report with storagePath: ${storagPathForTus}`);
-      const response = await fetch("/api/generate-report", {
+      // ─── 4. Upload transactions blob to Supabase Storage ───
+      setStage("uploading");
+      setProgress("Uploading transaction data…");
+      setUploadPct(0);
+
+      const slug = generateSlug(12);
+      const transactionsBlobPath = `transactions/${slug}.json`;
+
+      // Build JSON blob
+      const transactionsJson = JSON.stringify(result.compactTransactions);
+      const blobSizeMB = (transactionsJson.length / 1024 / 1024).toFixed(1);
+      console.log(`[Client] Transactions blob: ${blobSizeMB}MB, uploading to ${transactionsBlobPath}`);
+
+      // Get Supabase credentials (reuse get-upload-url endpoint for the URL/key)
+      const credRes = await fetch("/api/get-upload-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: "data.csv" }), // filename doesn't matter, we just need creds
+      });
+
+      if (!credRes.ok) {
+        throw new Error("Failed to get upload credentials");
+      }
+
+      const { supabaseUrl, anonKey } = await credRes.json();
+
+      const transactionsBlob = new Blob([transactionsJson], { type: "application/json" });
+
+      // Free the JSON string (let GC collect it)
+      // transactionsJson is const so we can't null it, but it goes out of scope
+
+      await uploadBlobViaTus(
+        transactionsBlob,
+        transactionsBlobPath,
+        supabaseUrl,
+        anonKey,
+        "application/json",
+        (pct) => {
+          setUploadPct(pct);
+          setProgress(`Uploading transaction data… ${pct}%`);
+        },
+      );
+
+      console.log(`[Client] Blob uploaded to ${transactionsBlobPath}`);
+
+      // ─── 5. Save report via thin API ───
+      setStage("saving");
+      setProgress("Saving report…");
+
+      // Format rollup data for the server (snake_case for DB)
+      const employerRollups = result.employerRollups.map((er) => ({
+        employer_name: er.employerName,
+        employer_key: er.employerKey,
+        worker_count: er.workerCount,
+        transaction_count: er.transactionCount,
+        total_debit_cents: er.totalDebitCents,
+        total_credit_cents: er.totalCreditCents,
+        card_count: er.cardCount,
+        card_amount_cents: er.cardAmountCents,
+        atm_count: er.atmCount,
+        atm_amount_cents: er.atmAmountCents,
+        fee_count: er.feeCount,
+        fee_amount_cents: er.feeAmountCents,
+        book_count: er.bookCount,
+        book_amount_cents: er.bookAmountCents,
+        remittance_count: er.remittanceCount,
+        remittance_amount_cents: er.remittanceAmountCents,
+        workers_in_us: er.workersInUs,
+        workers_not_in_us: er.workersNotInUs,
+        workers_unknown_us: er.workersUnknownUs,
+        vendor_breakdown: er.vendorBreakdown,
+      }));
+
+      const vendorRollups = result.vendorRollups.map((vr) => ({
+        vendor_name: vr.vendorName,
+        transaction_count: vr.transactionCount,
+        total_amount_cents: vr.totalAmountCents,
+        unique_customers: vr.uniqueCustomers,
+      }));
+
+      const customerLocationRows = result.customerLocationRows.map((loc) => ({
+        customer_id: loc.customerId,
+        employer_name: loc.employerName,
+        employer_key: loc.employerKey,
+        in_us: loc.inUs,
+        latest_location_raw: loc.latestLocationRaw,
+        latest_location_city: loc.latestLocationCity,
+        latest_location_state: loc.latestLocationState,
+        latest_location_country: loc.latestLocationCountry,
+        latest_location_date: loc.latestLocationDate,
+        transaction_count: loc.transactionCount,
+      }));
+
+      const saveRes = await fetch("/api/save-report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          storagePath: storagPathForTus,
-          options: { inUsFilter },
+          slug,
+          inUsFilter,
+          transactionsBlobPath,
+          stats: result.stats,
+          classificationRules: {
+            transactionTypeRules: DEFAULT_TRANSACTION_TYPE_RULES,
+            remittanceVendorRules: DEFAULT_REMITTANCE_VENDOR_RULES,
+          },
+          employerRollups,
+          vendorRollups,
+          customerLocationRows,
         }),
       });
 
-      log("process", `generate-report response: ${response.status}`);
-
-      if (!response.ok) {
-        const contentType = response.headers.get("content-type");
-        if (contentType?.includes("application/json")) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || "Failed to start processing");
-        }
-        const errorText = await response.text();
-        throw new Error(errorText || `Failed to start processing (${response.status})`);
+      if (!saveRes.ok) {
+        const errData = await saveRes.json().catch(() => ({}));
+        throw new Error(errData.error || `Failed to save report (${saveRes.status})`);
       }
 
-      const result = await response.json();
-      log("process", `Processing started, redirecting to /r/${result.slug}`);
-      setProgress("Processing started! Redirecting…");
-      router.push(`/r/${result.slug}`);
+      const saveResult = await saveRes.json();
+      const totalSec = ((Date.now() - totalStart) / 1000).toFixed(1);
+      console.log(`[Client] ✓ Report saved! ${slug} — total time: ${totalSec}s`);
+
+      // ─── 6. Done! Redirect ───
+      setStage("done");
+      setProgress(`Done! ${result.stats.totalRows.toLocaleString()} transactions processed in ${totalSec}s`);
+
+      router.push(saveResult.url || `/r/${slug}`);
+
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : "An error occurred";
-      log("error", `Upload flow failed: ${errMsg}`, {
-        stack: err instanceof Error ? err.stack : undefined,
-      });
+      console.error("[Client] Processing failed:", err);
       setError(errMsg);
-      setIsProcessing(false);
-      setIsUploading(false);
+      setStage("idle");
       setProgress("");
-      setUploadProgress(0);
+      setUploadPct(0);
     }
   };
 
@@ -232,7 +303,7 @@ export function UploadForm() {
         <CardHeader>
           <CardTitle>Transaction CSV</CardTitle>
           <CardDescription>
-            Upload a Unit transaction export CSV file
+            Upload a Unit transaction export CSV file — processed locally in your browser
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -266,7 +337,7 @@ export function UploadForm() {
                   <span className="font-medium text-accent">Drag & drop</span> a CSV here
                 </p>
                 <p className="mt-2 text-xs text-muted">or<span className="text-accent ml-1">Browse Files</span></p>
-                <p className="mt-3 text-xs text-muted/70">CSV files only • Up to 500MB supported</p>
+                <p className="mt-3 text-xs text-muted/70">CSV files only • Up to 500MB • Processed locally</p>
               </div>
             )}
             <input
@@ -329,30 +400,61 @@ export function UploadForm() {
       )}
 
       {/* Progress */}
-      {isProcessing && progress && (
+      {isProcessing && (
         <div className="rounded-lg border border-accent/30 bg-accent/10 p-4">
           <div className="flex items-center gap-3">
-            <svg className="h-5 w-5 animate-spin text-accent" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-            </svg>
-            <div className="flex-1">
-              <p className="text-sm font-medium text-accent">{progress}</p>
-              {isUploading && (
-                <div className="mt-2 h-1.5 w-full rounded-full bg-dark-bg-tertiary overflow-hidden">
-                  {uploadProgress > 0 ? (
+            {stage !== "done" ? (
+              <svg className="h-5 w-5 animate-spin text-accent flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            ) : (
+              <svg className="h-5 w-5 text-emerald-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            )}
+            <div className="flex-1 min-w-0">
+              <p className={`text-sm font-medium ${stage === "done" ? "text-emerald-400" : "text-accent"}`}>
+                {progress || STAGE_MESSAGES[stage]}
+              </p>
+
+              {/* Stage indicator */}
+              <div className="mt-2 flex gap-1">
+                {(["reading", "mapping", "processing", "uploading", "saving"] as Stage[]).map((s) => {
+                  const stages: Stage[] = ["reading", "mapping", "processing", "uploading", "saving", "done"];
+                  const currentIdx = stages.indexOf(stage);
+                  const stageIdx = stages.indexOf(s);
+                  const isComplete = currentIdx > stageIdx;
+                  const isCurrent = stage === s;
+
+                  return (
                     <div
-                      className="h-full bg-accent transition-all duration-300 ease-out"
-                      style={{ width: `${uploadProgress}%` }}
+                      key={s}
+                      className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${
+                        isComplete
+                          ? "bg-accent"
+                          : isCurrent
+                            ? "bg-accent/60 animate-pulse"
+                            : "bg-dark-bg-tertiary"
+                      }`}
                     />
-                  ) : (
-                    <div className="h-full w-1/3 animate-pulse bg-accent/70" />
-                  )}
+                  );
+                })}
+              </div>
+
+              {/* Upload progress bar */}
+              {stage === "uploading" && uploadPct > 0 && (
+                <div className="mt-2 h-1.5 w-full rounded-full bg-dark-bg-tertiary overflow-hidden">
+                  <div
+                    className="h-full bg-accent transition-all duration-300 ease-out"
+                    style={{ width: `${uploadPct}%` }}
+                  />
                 </div>
               )}
-              {isUploading && uploadProgress === 0 && (
-                <p className="mt-1.5 text-xs text-muted">
-                  Establishing connection to upload service… (check browser console for details)
+
+              {stage === "processing" && (
+                <p className="mt-1 text-xs text-muted">
+                  Your browser is doing all the work — no data leaves your machine until upload.
                 </p>
               )}
             </div>
@@ -370,7 +472,7 @@ export function UploadForm() {
       </button>
 
       <p className="text-center text-xs text-muted">
-        Files are processed securely. Reports expire after 7 days.
+        Files are processed locally in your browser. Only results are uploaded. Reports expire after 7 days.
       </p>
     </form>
   );

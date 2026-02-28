@@ -21,11 +21,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const body = await request.json();
     const filename: string = body.filename ?? "upload.csv";
 
-    // Validate
+    // Validate — allow CSV files and JSON blobs
     const normalized = filename.toLowerCase();
-    if (!normalized.endsWith(".csv")) {
+    if (!normalized.endsWith(".csv") && !normalized.endsWith(".json")) {
       return NextResponse.json(
-        { error: "Only CSV files are allowed" },
+        { error: "Only CSV and JSON files are allowed" },
         { status: 400 }
       );
     }
