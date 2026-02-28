@@ -61,12 +61,13 @@ export default async function EmployerDetailPage({ params }: PageProps) {
       </div>
 
       {/* Employer KPIs */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-7">
         <StatCard label="Workers" value={formatNumber(rollup.workerCount)} />
         <StatCard label="Total Debit" value={formatCents(rollup.totalDebitCents)} color="text-red-400" />
         <StatCard label="Total Credit" value={formatCents(rollup.totalCreditCents)} color="text-emerald-400" />
         <StatCard label="Card Spend" value={formatCents(rollup.cardAmountCents)} color="text-accent" />
         <StatCard label="ATM" value={formatCents(rollup.atmAmountCents)} color="text-amber-400" />
+        <StatCard label="Book/Payment" value={formatCents(rollup.bookAmountCents)} color="text-emerald-400" />
         <StatCard label="Remittance" value={formatCents(rollup.remittanceAmountCents)} color="text-violet-400" />
       </div>
 
@@ -192,6 +193,7 @@ export default async function EmployerDetailPage({ params }: PageProps) {
       <TransactionsTable
         reportId={report.id}
         slug={slug}
+        employerKey={decodedKey}
         transactionGroups={transactionGroups}
         vendorNames={vendorNames}
       />

@@ -24,7 +24,7 @@ export function VendorSummary({ rollups }: VendorSummaryProps) {
         {sorted.length === 0 ? (
           <p className="text-sm text-muted">No remittance transactions detected</p>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
             {sorted.map((v) => (
               <div
                 key={v.vendorName}

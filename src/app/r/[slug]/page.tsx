@@ -149,6 +149,12 @@ export default async function ReportPage({ params }: PageProps) {
             })}
             {" · "}
             US Filter: <span className="font-medium text-accent">{report.inUsFilter}</span>
+            {report.stats.locationRecencyDays > 0 && (
+              <>
+                {" · "}
+                Location Window: <span className="font-medium text-accent">{report.stats.locationRecencyDays} days</span>
+              </>
+            )}
           </p>
         </div>
         <div className="flex flex-col items-end gap-2">

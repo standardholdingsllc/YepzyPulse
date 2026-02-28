@@ -78,6 +78,9 @@ export interface IngestOptions {
   employerMappingJson: unknown;
   transactionTypeRules?: TransactionTypeRule[];
   remittanceVendorRules?: RemittanceVendorRule[];
+  /** Only consider locations from the last N days when determining "in US".
+   *  0 or undefined = use all time. */
+  locationRecencyDays?: number;
 }
 
 export interface IngestResult {
@@ -107,6 +110,7 @@ export function runIngestionPipeline(options: IngestOptions): IngestResult {
     employerMappingJson,
     transactionTypeRules = DEFAULT_TRANSACTION_TYPE_RULES,
     remittanceVendorRules = DEFAULT_REMITTANCE_VENDOR_RULES,
+    locationRecencyDays = 0,
   } = options;
 
   const startTime = Date.now();
@@ -131,6 +135,7 @@ export function runIngestionPipeline(options: IngestOptions): IngestResult {
     state: string | null;
   }>();
   const allCustomerIds = new Set<string>();
+  let maxTransactionDate = 0; // Track latest date in dataset for recency window
 
   Papa.parse<Record<string, string>>(csvText, {
     header: true,
@@ -142,6 +147,10 @@ export function runIngestionPipeline(options: IngestOptions): IngestResult {
       if (customerId) allCustomerIds.add(customerId);
 
       const unitType = row.type?.trim() || "";
+      const createdAt = parseTimestamp(row.createdAt);
+      const ts = createdAt?.getTime() || 0;
+      if (ts > maxTransactionDate) maxTransactionDate = ts;
+
       if (!isLocationBearingType(unitType)) return;
 
       const summary = row.summary?.trim() || "";
@@ -149,9 +158,6 @@ export function runIngestionPipeline(options: IngestOptions): IngestResult {
 
       const loc = extractLocationFast(summary);
       if (!loc || !loc.country) return;
-
-      const createdAt = parseTimestamp(row.createdAt);
-      const ts = createdAt?.getTime() || 0;
 
       const existing = customerLatestLocation.get(customerId);
       if (!existing || ts > existing.latestDate) {
@@ -166,7 +172,15 @@ export function runIngestionPipeline(options: IngestOptions): IngestResult {
     },
   });
 
-  // Build customerInUsMap from locations
+  // Build customerInUsMap from locations, applying recency window
+  const locationCutoffDate = (locationRecencyDays > 0 && maxTransactionDate > 0)
+    ? maxTransactionDate - (locationRecencyDays * 24 * 60 * 60 * 1000)
+    : 0; // 0 = no cutoff, use all time
+
+  if (locationCutoffDate > 0) {
+    console.log(`[Ingest] Location recency: ${locationRecencyDays} days, cutoff: ${new Date(locationCutoffDate).toISOString()}, max date: ${new Date(maxTransactionDate).toISOString()}`);
+  }
+
   const customerInUsMap = new Map<string, "true" | "false" | "unknown">();
   let customersInUsTrue = 0;
   let customersInUsFalse = 0;
@@ -174,7 +188,8 @@ export function runIngestionPipeline(options: IngestOptions): IngestResult {
 
   for (const cid of allCustomerIds) {
     const loc = customerLatestLocation.get(cid);
-    if (!loc) {
+    // If no location, or location is outside the recency window → unknown
+    if (!loc || (locationCutoffDate > 0 && loc.latestDate < locationCutoffDate)) {
       customerInUsMap.set(cid, "unknown");
       customersInUsUnknown++;
     } else if (loc.country === "US") {
@@ -203,6 +218,10 @@ export function runIngestionPipeline(options: IngestOptions): IngestResult {
   let rowsWithLocations = 0;
   let unknownEmployerCount = 0;
   let remittanceCount = 0;
+  let globalDebitCents = 0;
+  let globalCreditCents = 0;
+  let globalBookAmountCents = 0;
+  let globalRemittanceAmountCents = 0;
   const transactionGroupCounts: Record<string, number> = {};
   const vendorMatchCounts: Record<string, number> = {};
 
@@ -335,10 +354,13 @@ export function runIngestionPipeline(options: IngestOptions): IngestResult {
       rollup.transactionCount++;
       const amt = Math.abs(amountCents);
 
+      // Global volume tracking
       if (direction.toLowerCase() === "debit") {
         rollup.totalDebitCents += amt;
+        globalDebitCents += amt;
       } else if (direction.toLowerCase() === "credit") {
         rollup.totalCreditCents += amt;
+        globalCreditCents += amt;
       }
 
       switch (transactionGroup) {
@@ -357,12 +379,14 @@ export function runIngestionPipeline(options: IngestOptions): IngestResult {
         case "Book/Payment":
           rollup.bookCount++;
           rollup.bookAmountCents += amt;
+          globalBookAmountCents += amt;
           break;
       }
 
       if (remittanceVendor !== "Not remittance") {
         rollup.remittanceCount++;
         rollup.remittanceAmountCents += amt;
+        globalRemittanceAmountCents += amt;
         if (!rollup.vendorBreakdown[remittanceVendor]) {
           rollup.vendorBreakdown[remittanceVendor] = { count: 0, amountCents: 0 };
         }
@@ -441,11 +465,17 @@ export function runIngestionPipeline(options: IngestOptions): IngestResult {
     customersInUsFalse,
     customersInUsUnknown,
     unknownEmployerCount,
-    remittanceMatchRate: totalRows > 0 ? remittanceCount / totalRows : 0,
+    // Remittance rate = % of DEBIT VOLUME (dollar-based, not count-based)
+    remittanceMatchRate: globalDebitCents > 0 ? globalRemittanceAmountCents / globalDebitCents : 0,
     totalCustomers: allCustomerIds.size,
     totalEmployers: employerRollupMap.size,
     transactionGroupCounts,
     vendorMatchCounts,
+    totalDebitCents: globalDebitCents,
+    totalCreditCents: globalCreditCents,
+    totalBookAmountCents: globalBookAmountCents,
+    totalRemittanceAmountCents: globalRemittanceAmountCents,
+    locationRecencyDays,
   };
 
   const totalTime = Date.now() - startTime;

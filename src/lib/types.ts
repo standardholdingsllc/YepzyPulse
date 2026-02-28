@@ -78,6 +78,13 @@ export interface ReportStats {
   totalEmployers: number;
   transactionGroupCounts: Record<string, number>;
   vendorMatchCounts: Record<string, number>;
+  // Volume-based stats (cents)
+  totalDebitCents: number;
+  totalCreditCents: number;
+  totalBookAmountCents: number;
+  totalRemittanceAmountCents: number;
+  // Location recency setting (0 = all time)
+  locationRecencyDays: number;
 }
 
 export interface ReportOverview {

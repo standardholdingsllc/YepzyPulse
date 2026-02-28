@@ -10,6 +10,7 @@ import { DEFAULT_REMITTANCE_VENDOR_RULES } from "@/lib/classification/remittance
 import { generateSlug } from "@/lib/utils";
 
 type InUsFilter = "strict" | "lenient" | "all";
+type LocationRecency = 7 | 14 | 30 | 0;
 type Stage = "idle" | "reading" | "mapping" | "processing" | "uploading" | "saving" | "done";
 
 const EMPLOYER_MAPPING_URL =
@@ -91,6 +92,7 @@ export function UploadForm() {
   const router = useRouter();
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [inUsFilter, setInUsFilter] = useState<InUsFilter>("strict");
+  const [locationRecency, setLocationRecency] = useState<LocationRecency>(30);
   const [stage, setStage] = useState<Stage>("idle");
   const [progress, setProgress] = useState("");
   const [uploadPct, setUploadPct] = useState(0);
@@ -170,6 +172,7 @@ export function UploadForm() {
         employerMappingJson,
         transactionTypeRules: DEFAULT_TRANSACTION_TYPE_RULES,
         remittanceVendorRules: DEFAULT_REMITTANCE_VENDOR_RULES,
+        locationRecencyDays: locationRecency,
       });
 
       const pipelineMs = Date.now() - pipelineStart;
@@ -396,6 +399,48 @@ export function UploadForm() {
                   value={option.value}
                   checked={inUsFilter === option.value}
                   onChange={() => setInUsFilter(option.value as InUsFilter)}
+                  className="mt-0.5 h-4 w-4 accent-accent"
+                />
+                <div>
+                  <p className="text-sm font-medium text-white">{option.label}</p>
+                  <p className="text-xs text-muted">{option.desc}</p>
+                </div>
+              </label>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Location Recency */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Location Recency Window</CardTitle>
+          <CardDescription>
+            How recent must a transaction be to count toward a worker&apos;s &quot;in US&quot; status?
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3">
+            {([
+              { value: 7, label: "Last 7 days", desc: "Only the most recent week of data determines location" },
+              { value: 14, label: "Last 14 days", desc: "Two weeks of data — good for bi-weekly pay cycles" },
+              { value: 30, label: "Last 30 days", desc: "One month of data — recommended default" },
+              { value: 0, label: "All time", desc: "Any location in the file counts — use for short date ranges" },
+            ] as const).map((option) => (
+              <label
+                key={option.value}
+                className={`flex items-start gap-3 rounded-lg border p-4 cursor-pointer transition-all ${
+                  locationRecency === option.value
+                    ? "border-accent/50 bg-accent/5"
+                    : "border-dark-border hover:border-dark-border-hover hover:bg-dark-bg-tertiary/30"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="locationRecency"
+                  value={option.value}
+                  checked={locationRecency === option.value}
+                  onChange={() => setLocationRecency(option.value)}
                   className="mt-0.5 h-4 w-4 accent-accent"
                 />
                 <div>

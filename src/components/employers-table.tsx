@@ -34,6 +34,7 @@ const columns: { key: SortKey; label: string; align?: string }[] = [
   { key: "cardAmountCents", label: "Card", align: "right" },
   { key: "atmAmountCents", label: "ATM", align: "right" },
   { key: "feeAmountCents", label: "Fees", align: "right" },
+  { key: "bookAmountCents", label: "Book/Pay", align: "right" },
   { key: "remittanceAmountCents", label: "Remittance $", align: "right" },
   { key: "remittanceCount", label: "Remit. #", align: "right" },
 ];
@@ -43,6 +44,7 @@ export function EmployersTable({ rollups, slug }: EmployersTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>("remittanceAmountCents");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [filterRemittance, setFilterRemittance] = useState<"all" | "yes" | "no">("all");
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
   const filtered = useMemo(() => {
     let data = [...rollups];
@@ -95,110 +97,145 @@ export function EmployersTable({ rollups, slug }: EmployersTableProps) {
     <Card>
       <CardHeader>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <CardTitle>Employers ({formatNumber(filtered.length)})</CardTitle>
-          <div className="flex flex-wrap gap-2">
-            <input
-              type="text"
-              placeholder="Search employers..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="rounded-lg border border-dark-border bg-dark-bg-tertiary px-3 py-1.5 text-sm text-white placeholder:text-muted focus:border-accent focus:outline-none"
-            />
-            <select
-              value={filterRemittance}
-              onChange={(e) => setFilterRemittance(e.target.value as "all" | "yes" | "no")}
-              className="rounded-lg border border-dark-border bg-dark-bg-tertiary px-3 py-1.5 text-sm text-white focus:border-accent focus:outline-none"
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsCollapsed(!isCollapsed)}
+              className="flex items-center gap-2 group"
             >
-              <option value="all">All employers</option>
-              <option value="yes">Has remittance</option>
-              <option value="no">No remittance</option>
-            </select>
+              <svg
+                className={`h-4 w-4 text-muted group-hover:text-white transition-all ${isCollapsed ? "" : "rotate-90"}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+              <CardTitle className="cursor-pointer group-hover:text-accent transition-colors">
+                Employers ({formatNumber(filtered.length)})
+              </CardTitle>
+            </button>
           </div>
+          {!isCollapsed && (
+            <div className="flex flex-wrap gap-2">
+              <input
+                type="text"
+                placeholder="Search employers..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="rounded-lg border border-dark-border bg-dark-bg-tertiary px-3 py-1.5 text-sm text-white placeholder:text-muted focus:border-accent focus:outline-none"
+              />
+              <select
+                value={filterRemittance}
+                onChange={(e) => setFilterRemittance(e.target.value as "all" | "yes" | "no")}
+                className="rounded-lg border border-dark-border bg-dark-bg-tertiary px-3 py-1.5 text-sm text-white focus:border-accent focus:outline-none"
+              >
+                <option value="all">All employers</option>
+                <option value="yes">Has remittance</option>
+                <option value="no">No remittance</option>
+              </select>
+            </div>
+          )}
         </div>
       </CardHeader>
-      <CardContent className="overflow-x-auto p-0">
-        <table className="min-w-full text-sm">
-          <thead>
-            <tr className="border-b border-dark-border bg-dark-bg-tertiary/50 text-left">
-              {columns.map((col) => (
-                <th
-                  key={col.key}
-                  className={`cursor-pointer select-none whitespace-nowrap px-4 py-3 font-medium text-muted hover:text-white transition-colors ${
-                    col.align === "right" ? "text-right" : ""
-                  }`}
-                  onClick={() => handleSort(col.key)}
-                >
-                  {col.label}{" "}
-                  <span className="text-xs text-muted/50">
-                    {sortIcon(col.key)}
-                  </span>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-dark-border">
-            {filtered.map((r) => (
-              <tr
-                key={r.employerKey}
-                className="table-row-hover transition-colors"
-              >
-                <td className="px-4 py-3">
-                  <Link
-                    href={`/r/${slug}/employer/${encodeURIComponent(r.employerKey)}`}
-                    className="font-medium text-accent hover:text-accent-light hover:underline"
+
+      {!isCollapsed && (
+        <CardContent className="overflow-x-auto p-0">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="border-b border-dark-border bg-dark-bg-tertiary/50 text-left">
+                {columns.map((col) => (
+                  <th
+                    key={col.key}
+                    className={`cursor-pointer select-none whitespace-nowrap px-4 py-3 font-medium text-muted hover:text-white transition-colors ${
+                      col.align === "right" ? "text-right" : ""
+                    }`}
+                    onClick={() => handleSort(col.key)}
                   >
-                    {r.employerName}
-                  </Link>
-                  <div className="mt-0.5 flex gap-1">
-                    {r.workersInUs > 0 && (
-                      <Badge variant="success">{r.workersInUs} in US</Badge>
-                    )}
-                    {r.workersNotInUs > 0 && (
-                      <Badge variant="danger">{r.workersNotInUs} outside</Badge>
-                    )}
-                    {r.workersUnknownUs > 0 && (
-                      <Badge variant="warning">{r.workersUnknownUs} unknown</Badge>
-                    )}
-                  </div>
-                </td>
-                <td className="px-4 py-3 text-right tabular-nums text-muted-light">
-                  {formatNumber(r.workerCount)}
-                </td>
-                <td className="px-4 py-3 text-right tabular-nums text-muted-light">
-                  {formatNumber(r.transactionCount)}
-                </td>
-                <td className="px-4 py-3 text-right tabular-nums font-medium text-white">
-                  {formatCents(r.totalDebitCents)}
-                </td>
-                <td className="px-4 py-3 text-right tabular-nums text-muted-light">
-                  {formatCents(r.cardAmountCents)}
-                </td>
-                <td className="px-4 py-3 text-right tabular-nums text-muted-light">
-                  {formatCents(r.atmAmountCents)}
-                </td>
-                <td className="px-4 py-3 text-right tabular-nums text-muted-light">
-                  {formatCents(r.feeAmountCents)}
-                </td>
-                <td className="px-4 py-3 text-right tabular-nums font-medium text-violet-400">
-                  {r.remittanceAmountCents > 0
-                    ? formatCents(r.remittanceAmountCents)
-                    : <span className="text-muted/50">—</span>}
-                </td>
-                <td className="px-4 py-3 text-right tabular-nums text-muted-light">
-                  {r.remittanceCount > 0 ? formatNumber(r.remittanceCount) : <span className="text-muted/50">—</span>}
-                </td>
+                    {col.label}{" "}
+                    <span className="text-xs text-muted/50">
+                      {sortIcon(col.key)}
+                    </span>
+                  </th>
+                ))}
               </tr>
-            ))}
-            {filtered.length === 0 && (
-              <tr>
-                <td colSpan={columns.length} className="px-4 py-8 text-center text-muted">
-                  No employers found
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </CardContent>
+            </thead>
+            <tbody className="divide-y divide-dark-border">
+              {filtered.map((r) => (
+                <tr
+                  key={r.employerKey}
+                  className="table-row-hover transition-colors"
+                >
+                  <td className="px-4 py-3">
+                    <Link
+                      href={`/r/${slug}/employer/${encodeURIComponent(r.employerKey)}`}
+                      className="font-medium text-accent hover:text-accent-light hover:underline"
+                    >
+                      {r.employerName}
+                    </Link>
+                    <div className="mt-0.5 flex gap-1">
+                      {r.workersInUs > 0 && (
+                        <Badge variant="success">{r.workersInUs} in US</Badge>
+                      )}
+                      {r.workersNotInUs > 0 && (
+                        <Badge variant="danger">{r.workersNotInUs} outside</Badge>
+                      )}
+                      {r.workersUnknownUs > 0 && (
+                        <Badge variant="warning">{r.workersUnknownUs} unknown</Badge>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums text-muted-light">
+                    {formatNumber(r.workerCount)}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums text-muted-light">
+                    {formatNumber(r.transactionCount)}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums font-medium text-white">
+                    {formatCents(r.totalDebitCents)}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums text-muted-light">
+                    {formatCents(r.cardAmountCents)}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums text-muted-light">
+                    {formatCents(r.atmAmountCents)}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums text-muted-light">
+                    {formatCents(r.feeAmountCents)}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums text-emerald-400">
+                    {r.bookAmountCents > 0
+                      ? formatCents(r.bookAmountCents)
+                      : <span className="text-muted/50">—</span>}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums font-medium text-violet-400">
+                    {r.remittanceAmountCents > 0
+                      ? formatCents(r.remittanceAmountCents)
+                      : <span className="text-muted/50">—</span>}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums text-muted-light">
+                    {r.remittanceCount > 0 ? formatNumber(r.remittanceCount) : <span className="text-muted/50">—</span>}
+                  </td>
+                </tr>
+              ))}
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={columns.length} className="px-4 py-8 text-center text-muted">
+                    No employers found
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </CardContent>
+      )}
+
+      {isCollapsed && (
+        <CardContent className="pt-0">
+          <p className="text-xs text-muted">
+            Click header to expand • {formatNumber(rollups.length)} employers
+          </p>
+        </CardContent>
+      )}
     </Card>
   );
 }

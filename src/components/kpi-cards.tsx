@@ -17,48 +17,48 @@ export function KpiCards({ stats, vendorRollups }: KpiCardsProps) {
     .filter((v) => v.vendorName !== "Not remittance")
     .reduce((sum, v) => sum + v.transactionCount, 0);
 
+  // Volume-based remittance rate: remittance $ / total debit $
+  const remittanceRatePct =
+    stats.totalDebitCents > 0
+      ? (stats.totalRemittanceAmountCents / stats.totalDebitCents) * 100
+      : stats.remittanceMatchRate * 100; // fallback for older reports
+
   const kpis = [
     {
       label: "Total Transactions",
       value: formatNumber(stats.totalRows),
       sub: `${stats.totalCustomers} customers`,
       color: "text-white",
-      accent: "bg-dark-bg-tertiary",
     },
     {
       label: "Customers in US",
       value: formatNumber(stats.customersInUsTrue),
       sub: `${stats.customersInUsFalse} outside, ${stats.customersInUsUnknown} unknown`,
       color: "text-emerald-400",
-      accent: "bg-emerald-500/10",
     },
     {
       label: "Employers",
       value: formatNumber(stats.totalEmployers),
       sub: `${stats.unknownEmployerCount} unmapped txns`,
       color: "text-accent",
-      accent: "bg-accent/10",
     },
     {
       label: "Remittance Volume",
       value: formatCents(totalRemittanceAmount),
       sub: `${formatNumber(totalRemittanceTxns)} transactions`,
       color: "text-violet-400",
-      accent: "bg-violet-500/10",
     },
     {
-      label: "Locations Parsed",
-      value: formatNumber(stats.rowsWithLocations),
-      sub: `${((stats.rowsWithLocations / Math.max(stats.totalRows, 1)) * 100).toFixed(1)}% of transactions`,
-      color: "text-amber-400",
-      accent: "bg-amber-500/10",
+      label: "Book/Payment",
+      value: formatCents(stats.totalBookAmountCents || 0),
+      sub: `${formatNumber(stats.transactionGroupCounts?.["Book/Payment"] || 0)} transactions`,
+      color: "text-emerald-400",
     },
     {
       label: "Remittance Rate",
-      value: `${(stats.remittanceMatchRate * 100).toFixed(1)}%`,
-      sub: "of all transactions",
+      value: `${remittanceRatePct.toFixed(1)}%`,
+      sub: "of debit volume",
       color: "text-blue-400",
-      accent: "bg-blue-500/10",
     },
   ];
 

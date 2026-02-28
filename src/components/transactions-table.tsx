@@ -38,6 +38,10 @@ interface TransactionsTableProps {
   slug: string;
   transactionGroups: string[];
   vendorNames: string[];
+  /** Pre-filter to a specific employer */
+  employerKey?: string;
+  /** Pre-filter to a specific customer */
+  customerId?: string;
 }
 
 export function TransactionsTable({
@@ -45,6 +49,8 @@ export function TransactionsTable({
   slug,
   transactionGroups,
   vendorNames,
+  employerKey: initialEmployerKey,
+  customerId: initialCustomerId,
 }: TransactionsTableProps) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [total, setTotal] = useState(0);
@@ -56,7 +62,9 @@ export function TransactionsTable({
     transactionGroup: "",
     remittanceVendor: "",
     inUs: "",
-    employerKey: "",
+    employerKey: initialEmployerKey || "",
+    customerId: initialCustomerId || "",
+    customerIdSearch: initialCustomerId || "",
   });
 
   const pageSize = 50;
@@ -81,6 +89,12 @@ export function TransactionsTable({
       if (currentFilters.inUs) {
         params.set("inUs", currentFilters.inUs);
       }
+      if (currentFilters.employerKey) {
+        params.set("employerKey", currentFilters.employerKey);
+      }
+      if (currentFilters.customerId) {
+        params.set("customerId", currentFilters.customerId);
+      }
 
       const res = await fetch(`/api/transactions?${params.toString()}`);
       const data = await res.json();
@@ -100,6 +114,21 @@ export function TransactionsTable({
   const handleFilterChange = (key: string, value: string) => {
     setPage(1);
     setFilters((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleCustomerIdSearch = () => {
+    setPage(1);
+    setFilters((prev) => ({ ...prev, customerId: prev.customerIdSearch.trim() }));
+  };
+
+  const clearCustomerFilter = () => {
+    setFilters((prev) => ({ ...prev, customerId: "", customerIdSearch: "" }));
+    setPage(1);
+  };
+
+  const filterByCustomer = (customerId: string) => {
+    setPage(1);
+    setFilters((prev) => ({ ...prev, customerId, customerIdSearch: customerId }));
   };
 
   const toggleRowExpand = (id: number) => {
@@ -129,12 +158,21 @@ export function TransactionsTable({
     }
   };
 
+  const isFilteredByCustomer = filters.customerId !== "";
+
   return (
     <Card>
       <CardHeader>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
-            <CardTitle>Transactions ({formatNumber(total)})</CardTitle>
+            <CardTitle>
+              Transactions ({formatNumber(total)})
+              {isFilteredByCustomer && (
+                <span className="ml-2 text-sm font-normal text-accent">
+                  — Customer {filters.customerId}
+                </span>
+              )}
+            </CardTitle>
             <label className="flex items-center gap-1.5 text-xs text-muted cursor-pointer select-none">
               <input
                 type="checkbox"
@@ -146,6 +184,35 @@ export function TransactionsTable({
             </label>
           </div>
           <div className="flex flex-wrap gap-2">
+            {/* Customer ID search */}
+            <div className="flex">
+              <input
+                type="text"
+                placeholder="Customer ID…"
+                value={filters.customerIdSearch}
+                onChange={(e) => setFilters((prev) => ({ ...prev, customerIdSearch: e.target.value }))}
+                onKeyDown={(e) => e.key === "Enter" && handleCustomerIdSearch()}
+                className="rounded-l-lg border border-dark-border bg-dark-bg-tertiary px-3 py-1.5 text-sm text-white placeholder:text-muted focus:border-accent focus:outline-none w-32"
+              />
+              {isFilteredByCustomer ? (
+                <button
+                  onClick={clearCustomerFilter}
+                  className="rounded-r-lg border border-l-0 border-dark-border bg-red-500/20 px-2 py-1.5 text-xs text-red-400 hover:bg-red-500/30 transition-colors"
+                  title="Clear customer filter"
+                >
+                  ✕
+                </button>
+              ) : (
+                <button
+                  onClick={handleCustomerIdSearch}
+                  className="rounded-r-lg border border-l-0 border-dark-border bg-dark-bg-tertiary px-2 py-1.5 text-xs text-muted hover:text-white transition-colors"
+                  title="Search by Customer ID"
+                >
+                  →
+                </button>
+              )}
+            </div>
+
             <select
               value={filters.transactionGroup}
               onChange={(e) => handleFilterChange("transactionGroup", e.target.value)}
@@ -267,8 +334,18 @@ export function TransactionsTable({
                             {tx.direction}
                           </span>
                         </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-xs font-mono text-muted-light">
-                          {tx.customerId}
+                        <td className="whitespace-nowrap px-4 py-3">
+                          <button
+                            onClick={() => filterByCustomer(tx.customerId)}
+                            className={`text-xs font-mono transition-colors ${
+                              filters.customerId === tx.customerId
+                                ? "text-accent font-semibold"
+                                : "text-muted-light hover:text-accent hover:underline"
+                            }`}
+                            title={`View all transactions for ${tx.customerId}`}
+                          >
+                            {tx.customerId}
+                          </button>
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-light">
                           {tx.employerName}
