@@ -52,6 +52,7 @@ export function VendorCustomerTable({ slug, vendorName }: VendorCustomerTablePro
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   const pageSize = 25;
   const totalPages = Math.ceil(total / pageSize);
@@ -118,6 +119,71 @@ export function VendorCustomerTable({ slug, vendorName }: VendorCustomerTablePro
       });
     } catch {
       return dateStr;
+    }
+  };
+
+  const handleDownloadCsv = async () => {
+    setDownloading(true);
+    try {
+      const params = new URLSearchParams({
+        slug,
+        vendor: vendorName,
+        page: "1",
+        pageSize: "100000",
+        sortBy: sortKey,
+        sortDir,
+      });
+
+      const res = await fetch(`/api/vendor-customers?${params.toString()}`);
+      const data = await res.json();
+      const allCustomers: VendorCustomerData[] = data.customers || [];
+
+      if (allCustomers.length === 0) {
+        return;
+      }
+
+      const headers = [
+        "Customer ID",
+        "Employer Name",
+        "Vendor Amount ($)",
+        "Vendor Transactions",
+        "% of Remittance Volume",
+        "% of Remittance Txns",
+        "Total Remittance Amount ($)",
+        "Total Remittance Txns",
+        "US Status",
+        "Latest Transaction Date",
+      ];
+
+      const rows = allCustomers.map((c) => [
+        c.customerId,
+        `"${c.employerName.replace(/"/g, '""')}"`,
+        (c.vendorAmountCents / 100).toFixed(2),
+        c.vendorTransactionCount.toString(),
+        c.vendorPctOfRemittanceVolume.toFixed(2),
+        c.vendorPctOfRemittanceTxns.toFixed(2),
+        (c.totalRemittanceAmountCents / 100).toFixed(2),
+        c.totalRemittanceCount.toString(),
+        c.inUs === "true" ? "In US" : c.inUs === "false" ? "Outside US" : "Unknown",
+        c.latestTransactionDate || "",
+      ]);
+
+      const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      const safeVendorName = vendorName.replace(/[^a-zA-Z0-9]/g, "_");
+      link.download = `${safeVendorName}_customers_${new Date().toISOString().split("T")[0]}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Failed to download CSV:", err);
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -285,30 +351,78 @@ export function VendorCustomerTable({ slug, vendorName }: VendorCustomerTablePro
                 </tbody>
               </table>
 
-              {/* Pagination */}
-              {totalPages > 1 && (
-                <div className="flex items-center justify-between border-t border-dark-border px-4 py-3">
-                  <p className="text-xs text-muted">
-                    Page {page} of {formatNumber(totalPages)} · {formatNumber(total)} customers
-                  </p>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setPage(Math.max(1, page - 1))}
-                      disabled={page === 1}
-                      className="rounded-md border border-dark-border bg-dark-bg-tertiary px-3 py-1 text-xs font-medium text-white hover:bg-dark-border disabled:opacity-50"
-                    >
-                      Previous
-                    </button>
-                    <button
-                      onClick={() => setPage(Math.min(totalPages, page + 1))}
-                      disabled={page === totalPages}
-                      className="rounded-md border border-dark-border bg-dark-bg-tertiary px-3 py-1 text-xs font-medium text-white hover:bg-dark-border disabled:opacity-50"
-                    >
-                      Next
-                    </button>
-                  </div>
+              {/* Footer with pagination and download */}
+              <div className="flex items-center justify-between border-t border-dark-border px-4 py-3">
+                <p className="text-xs text-muted">
+                  {totalPages > 1 ? (
+                    <>Page {page} of {formatNumber(totalPages)} · </>
+                  ) : null}
+                  {formatNumber(total)} customers
+                </p>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={handleDownloadCsv}
+                    disabled={downloading || total === 0}
+                    className="flex items-center gap-1.5 rounded-md border border-dark-border bg-dark-bg-tertiary px-3 py-1.5 text-xs font-medium text-white hover:bg-dark-border hover:border-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {downloading ? (
+                      <svg
+                        className="h-3.5 w-3.5 animate-spin"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        />
+                      </svg>
+                    ) : (
+                      <svg
+                        className="h-3.5 w-3.5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                        />
+                      </svg>
+                    )}
+                    {downloading ? "Downloading..." : "Download CSV"}
+                  </button>
+                  {totalPages > 1 && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setPage(Math.max(1, page - 1))}
+                        disabled={page === 1}
+                        className="rounded-md border border-dark-border bg-dark-bg-tertiary px-3 py-1 text-xs font-medium text-white hover:bg-dark-border disabled:opacity-50"
+                      >
+                        Previous
+                      </button>
+                      <button
+                        onClick={() => setPage(Math.min(totalPages, page + 1))}
+                        disabled={page === totalPages}
+                        className="rounded-md border border-dark-border bg-dark-bg-tertiary px-3 py-1 text-xs font-medium text-white hover:bg-dark-border disabled:opacity-50"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
             </>
           )}
         </CardContent>
